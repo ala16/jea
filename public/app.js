@@ -236,20 +236,32 @@ async function telaPainel() {
         <div class="grade">
           <div><label for="cidade">Cidade</label><input id="cidade" name="cidade" type="text" maxlength="200" required></div>
           <div><label for="sindicato">Sindicato rural</label><input id="sindicato" name="sindicato" type="text" maxlength="200" required></div>
-          <div><label for="horario">Horário</label><input id="horario" name="horario" type="text" maxlength="200" placeholder="Ex: 8h às 12h" required></div>
+          <div>
+            <label>Horário</label>
+            <div class="horario">
+              <label>Entrada<input id="entrada" type="time" required></label>
+              <label>Saída<input id="saida" type="time" required></label>
+            </div>
+          </div>
         </div>
         <div class="erro" id="erro"></div>
         <div class="linha-botoes"><button type="submit">Cadastrar turma</button></div>
       </form>
     </div>`;
   const f = document.getElementById('f');
+  // Clicar em qualquer parte do campo abre o relógio do navegador.
+  f.querySelectorAll('input[type=time]').forEach((i) => (i.onclick = () => i.showPicker?.()));
   f.onsubmit = async (e) => {
     e.preventDefault();
     const botao = f.querySelector('button[type=submit]');
     if (botao.disabled) return;
     botao.disabled = true;
     try {
-      const { turma } = await api('/api/turmas', { json: Object.fromEntries(new FormData(f)) });
+      document.getElementById('erro').textContent = '';
+      if (f.saida.value <= f.entrada.value) throw new Error('O horário de saída precisa ser depois da entrada.');
+      const dados = Object.fromEntries(new FormData(f));
+      dados.horario = `${f.entrada.value} às ${f.saida.value}`;
+      const { turma } = await api('/api/turmas', { json: dados });
       avisar('Turma cadastrada.');
       ir(`#/turma/${turma.id}/1`);
     } catch (err) {
