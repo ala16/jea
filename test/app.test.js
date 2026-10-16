@@ -198,3 +198,30 @@ test('fórum: todos leem e publicam nos três fóruns', async () => {
   assert.equal((await esp(`/api/forum/topico/${topicoEsp}`, { method: 'DELETE' })).status, 200);
   assert.equal((await esp('/api/forum/especialista')).body.topicos.length, 0);
 });
+
+test('avisos: admin publica, cada perfil vê os seus', async () => {
+  const esp = cliente();
+  await esp('/api/entrar', { json: { cpf: '714.602.380-01' } });
+  await esp('/api/cadastro', { json: { nome: 'Carla Especialista', tipo: 'especialista' } });
+  const ins = cliente();
+  await ins('/api/entrar', { json: { cpf: '935.411.347-80' } });
+  await ins('/api/cadastro', { json: { nome: 'Davi Instrutor', tipo: 'instrutor' } });
+  const adm = cliente();
+  await adm('/api/admin/entrar', { json: { senha: 'segredo' } });
+
+  assert.equal((await esp('/api/admin/avisos', { json: { titulo: 'x', texto: 'y' } })).status, 401);
+  assert.equal((await adm('/api/admin/avisos', { json: { titulo: '', texto: 'y' } })).status, 400);
+  let r = await adm('/api/admin/avisos', { json: { titulo: 'Reunião', texto: 'Sexta às 9h', publico: 'todos' } });
+  assert.equal(r.status, 200);
+  r = await adm('/api/admin/avisos', { json: { titulo: 'Só instrutores', texto: 'Entreguem o módulo 3', publico: 'instrutor' } });
+  const soInstrutor = r.body.aviso.id;
+
+  assert.deepEqual((await esp('/api/avisos')).body.avisos.map((a) => a.titulo), ['Reunião']);
+  assert.deepEqual((await ins('/api/avisos')).body.avisos.map((a) => a.titulo), ['Só instrutores', 'Reunião']);
+  assert.equal((await adm('/api/avisos')).body.avisos.length, 2);
+  assert.equal((await cliente()('/api/avisos')).status, 401);
+
+  assert.equal((await adm(`/api/admin/avisos/${soInstrutor}`, { method: 'DELETE' })).status, 200);
+  assert.equal((await adm(`/api/admin/avisos/${soInstrutor}`, { method: 'DELETE' })).status, 404);
+  assert.equal((await ins('/api/avisos')).body.avisos.length, 1);
+});

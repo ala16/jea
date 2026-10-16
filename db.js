@@ -64,6 +64,15 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS forum_respostas_topico_idx ON forum_respostas (topico_id, criado_em);
   ALTER TABLE forum_topicos ADD COLUMN IF NOT EXISTS imagem TEXT;
   ALTER TABLE forum_respostas ADD COLUMN IF NOT EXISTS imagem TEXT;
+
+  -- Avisos que o admin envia para todos, só especialistas ou só instrutores.
+  CREATE TABLE IF NOT EXISTS avisos (
+    id SERIAL PRIMARY KEY,
+    titulo TEXT NOT NULL,
+    texto TEXT NOT NULL,
+    publico TEXT NOT NULL DEFAULT 'todos' CHECK (publico IN ('todos', 'especialista', 'instrutor')),
+    criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
 `;
 
 let pronto;
@@ -239,6 +248,18 @@ module.exports = {
   async excluirResposta(id) {
     const r = await um('DELETE FROM forum_respostas WHERE id = $1 RETURNING imagem', [id]);
     return r?.imagem ? [r.imagem] : [];
+  },
+
+  avisos: (tipo) =>
+    tipo
+      ? todos("SELECT * FROM avisos WHERE publico IN ('todos', $1) ORDER BY id DESC", [tipo])
+      : todos('SELECT * FROM avisos ORDER BY id DESC'),
+
+  criarAviso: ({ titulo, texto, publico }) =>
+    um('INSERT INTO avisos (titulo, texto, publico) VALUES ($1, $2, $3) RETURNING *', [titulo, texto, publico]),
+
+  async excluirAviso(id) {
+    return (await q('DELETE FROM avisos WHERE id = $1', [id])).rowCount;
   },
 
   async darFeedback(ids, feedback) {
