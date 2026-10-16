@@ -135,15 +135,33 @@ function avatar(foto, classe = '') {
   return foto ? `<img class="avatar ${classe}" src="${esc(foto)}" alt="">` : `<span class="avatar ${classe}"></span>`;
 }
 
+// Ícones do menu (traço simples, herdam a cor do texto).
+const ICONES = {
+  turmas: '<path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M7 9v5c0 1.5 2.2 3 5 3s5-1.5 5-3V9"/>',
+  material: '<path d="M4 5a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2V5z"/><path d="M8 7h6"/>',
+  avisos: '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+  forum: '<path d="M4 4h16v11H8l-4 4V4z"/><path d="M8 9h8M8 12h5"/>',
+  participantes: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.5a6.5 6.5 0 0 1 3.5 5.5"/>',
+  mensagens: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>',
+  perguntas: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6"/><path d="M12 17.5h.01"/>',
+  envios: '<path d="M9 4h6v3H9z"/><path d="M8 5H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2"/><path d="M9 13l2 2 4-4"/>',
+};
+
+function itemMenu(href, area, icone, rotulo, badge) {
+  return `<a href="${href}" data-area="${area}" title="${rotulo}">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONES[icone]}</svg>
+    <span>${rotulo}</span>${badge ? `<span class="badge" id="${badge}" hidden></span>` : ''}</a>`;
+}
+
 function topoDoUsuario(u) {
-  desenharTopo(`<nav class="menu">
-      <a href="#/painel" data-area="painel turma">Minhas turmas</a>
-      <a href="#/material" data-area="material">Material</a>
-      <a href="#/avisos" data-area="avisos">Avisos<span class="badge" id="badge-avisos" hidden></span></a>
-      <a href="#/forum/geral" data-area="forum">Fórum</a>
-      <a href="#/participantes" data-area="participantes">Participantes</a>
-      <a href="#/mensagens" data-area="mensagens">Mensagens<span class="badge" id="badge-mensagens" hidden></span></a>
-      <a href="#/perguntas" data-area="perguntas">Perguntas</a>
+  desenharTopo(`<nav class="menu" aria-label="Menu principal">
+      ${itemMenu('#/painel', 'painel turma', 'turmas', 'Minhas turmas')}
+      ${itemMenu('#/material', 'material', 'material', 'Material')}
+      ${itemMenu('#/avisos', 'avisos', 'avisos', 'Avisos', 'badge-avisos')}
+      ${itemMenu('#/forum/geral', 'forum', 'forum', 'Fórum')}
+      ${itemMenu('#/participantes', 'participantes perfil', 'participantes', 'Participantes')}
+      ${itemMenu('#/mensagens', 'mensagens', 'mensagens', 'Mensagens', 'badge-mensagens')}
+      ${itemMenu('#/perguntas', 'perguntas', 'perguntas', 'Perguntas')}
     </nav>
     <div class="usuario">
       <a class="meu-perfil" href="#/perfil" title="Editar meu perfil">${avatar(u.foto)}<span>${esc(u.nome.split(' ')[0])} · ${u.tipo === 'especialista' ? 'Especialista' : 'Instrutor'}</span><span class="lapis" aria-hidden="true">✎</span></a>
@@ -155,13 +173,13 @@ function topoDoUsuario(u) {
 }
 
 function topoDoAdmin() {
-  desenharTopo(`<nav class="menu">
-      <a href="#/admin" data-area="admin">Envios</a>
-      <a href="#/admin-avisos" data-area="admin-avisos">Avisos</a>
-      <a href="#/material" data-area="material">Material</a>
-      <a href="#/perguntas" data-area="perguntas">Perguntas<span class="badge" id="badge-perguntas" hidden></span></a>
-      <a href="#/forum/geral" data-area="forum">Fórum</a>
-      <a href="#/participantes" data-area="participantes">Participantes</a>
+  desenharTopo(`<nav class="menu" aria-label="Menu principal">
+      ${itemMenu('#/admin', 'admin', 'envios', 'Envios')}
+      ${itemMenu('#/admin-avisos', 'admin-avisos', 'avisos', 'Avisos')}
+      ${itemMenu('#/material', 'material', 'material', 'Material')}
+      ${itemMenu('#/perguntas', 'perguntas', 'perguntas', 'Perguntas', 'badge-perguntas')}
+      ${itemMenu('#/forum/geral', 'forum', 'forum', 'Fórum')}
+      ${itemMenu('#/participantes', 'participantes perfil', 'participantes', 'Participantes')}
     </nav>
     <div class="usuario"><span>Admin</span><button data-sair>Sair</button></div>`, '#/admin');
   api('/api/perguntas').then(({ perguntas }) => mostrarPendentes(perguntas)).catch(() => {});
