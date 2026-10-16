@@ -2,13 +2,29 @@
 
 Sistema web com acesso por CPF para especialistas e instrutores cadastrarem turmas e preencherem os 8 módulos, e um painel admin para ver todos os envios e dar feedback em massa.
 
-## Como rodar
+## Publicar na Vercel (https://jea.senarsp.com.br)
 
-Requer Node.js 22.13 ou superior (usa o SQLite embutido do Node, sem banco externo).
+A Vercel faz o deploy direto do GitHub a cada push na `main`. O projeto já vem configurado (`vercel.json`): as páginas saem da pasta `public/` e a API roda como função serverless em `api/index.js`.
+
+1. Na Vercel, **Add New → Project** e importe o repositório `ala16/jea` (Framework Preset: *Other*, sem build).
+2. Em **Storage**, crie e conecte ao projeto:
+   - um banco **Postgres** (Neon). Ele cria a variável `DATABASE_URL`; as tabelas são criadas sozinhas no primeiro acesso.
+   - um **Blob** com acesso *público*. Ele cria a variável `BLOB_READ_WRITE_TOKEN`.
+3. Em **Settings → Environment Variables**, adicione:
+   - `ADMIN_PASSWORD`: a senha do acesso admin.
+   - `SESSION_SECRET`: um texto longo e aleatório (por exemplo, a saída de `openssl rand -hex 32`). Sem ele o site não funciona em produção.
+4. Faça um novo deploy (**Deployments → Redeploy**) para as variáveis valerem.
+5. Em **Settings → Domains**, adicione `jea.senarsp.com.br`. No DNS do `senarsp.com.br`, crie o registro que a Vercel mostrar (normalmente `CNAME jea → cname.vercel-dns.com`).
+
+Fotos e anexos (até 5MB) vão do navegador direto para o Vercel Blob, porque as funções da Vercel só aceitam requisições de até 4,5MB. Os links dos arquivos têm um sufixo aleatório e não são listados em lugar nenhum, mas quem tiver o link consegue abrir.
+
+## Rodar localmente
+
+Requer Node.js 20 ou superior. Sem `DATABASE_URL` o sistema usa um Postgres embutido (PGlite) em `data/pglite`, e sem `BLOB_READ_WRITE_TOKEN` guarda os arquivos em `data/uploads`.
 
 ```bash
 npm install
-ADMIN_PASSWORD=sua-senha SESSION_SECRET=um-texto-longo-aleatorio npm start
+ADMIN_PASSWORD=sua-senha npm start
 # abre em http://localhost:3000
 ```
 
@@ -17,11 +33,11 @@ ADMIN_PASSWORD=sua-senha SESSION_SECRET=um-texto-longo-aleatorio npm start
 | Variável | Para que serve |
 | --- | --- |
 | `ADMIN_PASSWORD` | Senha do acesso admin. Sem ela o admin fica desativado. |
-| `SESSION_SECRET` | Chave que assina o cookie de sessão. Defina em produção, senão todos são deslogados a cada reinício. |
-| `PORT` | Porta do servidor (padrão 3000). |
-| `DB_PATH` | Arquivo do banco SQLite (padrão `data/jea.db`). |
-| `UPLOAD_DIR` | Pasta das fotos e anexos (padrão `data/uploads`). |
-| `NODE_ENV=production` | Marca o cookie como `Secure` (use com HTTPS). |
+| `SESSION_SECRET` | Chave que assina o cookie de sessão. Obrigatória em produção. |
+| `DATABASE_URL` | Conexão Postgres (criada pela Vercel ao conectar o Neon). `POSTGRES_URL` também é aceita. |
+| `BLOB_READ_WRITE_TOKEN` | Token do Vercel Blob (criado pela Vercel ao conectar o Blob). |
+| `PORT` | Porta local (padrão 3000). |
+| `PGLITE_DIR` / `UPLOAD_DIR` | Pastas do banco e dos arquivos no modo local. |
 
 ## Funcionalidades
 

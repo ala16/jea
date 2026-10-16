@@ -1,24 +1,20 @@
 'use strict';
 
 const path = require('path');
-const fs = require('fs');
 const crypto = require('crypto');
 const express = require('express');
-const multer = require('multer');
 const db = require('./db');
+const arquivos = require('./arquivos');
 const { MODULO1_ESPECIALISTA_CAMPOS } = require('./public/campos');
 
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
-const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, 'data', 'uploads');
+const PRODUCAO = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
+const SESSION_SECRET = process.env.SESSION_SECRET || (PRODUCAO ? null : crypto.randomBytes(32).toString('hex'));
 const MAX_TEXTO = 2000;
 
-if (!ADMIN_PASSWORD) {
-  console.warn('[aviso] ADMIN_PASSWORD não definida: o acesso admin fica desativado.');
-}
-
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+if (!ADMIN_PASSWORD) console.warn('[aviso] ADMIN_PASSWORD não definida: o acesso admin fica desativado.');
+if (!SESSION_SECRET) console.error('[erro] SESSION_SECRET não definida: defina essa variável no ambiente.');
 
 // ---------- utilidades ----------
 
@@ -41,7 +37,7 @@ function texto(v, max = MAX_TEXTO) {
   return String(v ?? '').slice(0, max);
 }
 
-// Sessão simples em cookie assinado com HMAC (sem dependências extras).
+// Sessão simples em cookie assinado com HMAC (funciona em serverless, sem estado no servidor).
 function assinar(valor) {
   const mac = crypto.createHmac('sha256', SESSION_SECRET).update(valor).digest('base64url');
   return `${valor}.${mac}`;
@@ -52,8 +48,7 @@ function verificar(cookie) {
   const i = cookie.lastIndexOf('.');
   if (i < 0) return null;
   const valor = cookie.slice(0, i);
-  const esperado = assinar(valor);
-  const a = Buffer.from(esperado);
+  const a = Buffer.from(assinar(valor));
   const b = Buffer.from(cookie);
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
   return valor;
@@ -71,7 +66,7 @@ function lerCookies(req) {
 function definirCookie(res, nome, valor, maxAgeSeg) {
   const partes = [`${nome}=${encodeURIComponent(valor)}`, 'Path=/', 'HttpOnly', 'SameSite=Lax'];
   if (maxAgeSeg !== undefined) partes.push(`Max-Age=${maxAgeSeg}`);
-  if (process.env.NODE_ENV === 'production') partes.push('Secure');
+  if (PRODUCAO) partes.push('Secure');
   res.append('Set-Cookie', partes.join('; '));
 }
 
@@ -82,16 +77,17 @@ function sessao(req) {
   return tipo === 'cpf' ? { cpf: id } : tipo === 'admin' ? { admin: true } : {};
 }
 
-function exigirCpf(req, res, next) {
+// Express 5 já repassa erros de funções async para o tratador de erros.
+async function exigirCpf(req, res, next) {
   const s = sessao(req);
   if (!s.cpf) return res.status(401).json({ erro: 'Faça login com seu CPF.' });
   req.cpf = s.cpf;
-  req.usuario = db.usuarioPorCpf(s.cpf) || null;
+  req.usuario = (await db.usuarioPorCpf(s.cpf)) || null;
   next();
 }
 
-function exigirUsuario(req, res, next) {
-  exigirCpf(req, res, () => {
+async function exigirUsuario(req, res, next) {
+  await exigirCpf(req, res, () => {
     if (!req.usuario) return res.status(403).json({ erro: 'Complete seu cadastro primeiro.' });
     next();
   });
@@ -102,54 +98,54 @@ function exigirAdmin(req, res, next) {
   next();
 }
 
-// ---------- upload ----------
-
-const upload = multer({
-  storage: multer.diskStorage({
-    destination: UPLOAD_DIR,
-    filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname).toLowerCase().replace(/[^.a-z0-9]/g, '').slice(0, 10);
-      cb(null, `${Date.now()}-${crypto.randomBytes(6).toString('hex')}${ext}`);
-    },
-  }),
-  limits: { fileSize: 5 * 1024 * 1024 },
-});
-
-function apenasImagem(file) {
-  return file && /^image\//.test(file.mimetype);
-}
-
-function removerArquivo(nome) {
-  if (!nome) return;
-  fs.unlink(path.join(UPLOAD_DIR, path.basename(nome)), () => {});
+// Lê { url, nome } enviado pelo navegador depois do upload e confere se é um arquivo nosso.
+function lerArquivo(v, { imagem } = {}) {
+  if (!v || typeof v !== 'object') return null;
+  const url = String(v.url || '');
+  if (!arquivos.urlValida(url)) throw Object.assign(new Error('Arquivo inválido.'), { status: 400 });
+  if (imagem && !arquivos.ehImagem(url)) throw Object.assign(new Error('O arquivo precisa ser uma imagem.'), { status: 400 });
+  return { url, nome: texto(v.nome || path.basename(url), 200) };
 }
 
 // ---------- app ----------
 
 const app = express();
+app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
 app.use((req, res, next) => {
+  if (!SESSION_SECRET) return res.status(500).json({ erro: 'Servidor sem SESSION_SECRET configurada.' });
   req.body ??= {};
   next();
 });
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Anexos: só o dono ou o admin podem baixar.
-app.get('/arquivos/:nome', (req, res) => {
+app.get('/api/config', (req, res) => {
+  res.json({ uploadDireto: arquivos.usaBlob });
+});
+
+// Upload: na Vercel o navegador envia direto para o Vercel Blob (limite de 4,5MB das funções);
+// localmente o arquivo vem para o servidor e fica em disco.
+app.post('/api/blob', exigirCpf, async (req, res) => {
+  res.json(await arquivos.gerarTokenBlob(req));
+});
+
+app.post('/api/upload', exigirCpf, arquivos.uploadLocal);
+
+app.get('/arquivos/:nome', async (req, res) => {
   const nome = path.basename(req.params.nome);
   const s = sessao(req);
-  const dono = db.donoDoArquivo(nome);
+  const dono = await db.donoDoArquivo(`/arquivos/${nome}`);
   if (!dono) return res.sendStatus(404);
   if (!s.admin && s.cpf !== dono) return res.sendStatus(403);
-  res.sendFile(path.join(UPLOAD_DIR, nome));
+  res.sendFile(arquivos.caminhoLocal(nome));
 });
 
 // Login por CPF
-app.post('/api/entrar', (req, res) => {
+app.post('/api/entrar', async (req, res) => {
   const cpf = limparCpf(req.body.cpf);
   if (!cpfValido(cpf)) return res.status(400).json({ erro: 'CPF inválido.' });
   definirCookie(res, 'sessao', assinar(`cpf:${cpf}`), 60 * 60 * 24 * 30);
-  res.json({ primeiroAcesso: !db.usuarioPorCpf(cpf) });
+  res.json({ primeiroAcesso: !(await db.usuarioPorCpf(cpf)) });
 });
 
 app.post('/api/sair', (req, res) => {
@@ -162,35 +158,23 @@ app.get('/api/eu', exigirCpf, (req, res) => {
 });
 
 // Primeiro acesso: nome, foto opcional, tipo
-app.post('/api/cadastro', exigirCpf, upload.single('foto'), (req, res) => {
-  if (req.usuario) {
-    removerArquivo(req.file?.filename);
-    return res.status(400).json({ erro: 'Cadastro já realizado.' });
-  }
+app.post('/api/cadastro', exigirCpf, async (req, res) => {
+  if (req.usuario) return res.status(400).json({ erro: 'Cadastro já realizado.' });
   const nome = texto(req.body.nome, 200).trim();
   const tipo = req.body.tipo;
-  if (nome.split(/\s+/).length < 2) {
-    removerArquivo(req.file?.filename);
-    return res.status(400).json({ erro: 'Informe seu nome completo.' });
-  }
-  if (!['especialista', 'instrutor'].includes(tipo)) {
-    removerArquivo(req.file?.filename);
-    return res.status(400).json({ erro: 'Escolha especialista ou instrutor.' });
-  }
-  if (req.file && !apenasImagem(req.file)) {
-    removerArquivo(req.file.filename);
-    return res.status(400).json({ erro: 'A foto precisa ser uma imagem.' });
-  }
-  const usuario = db.criarUsuario({ cpf: req.cpf, nome, tipo, foto: req.file?.filename || null });
+  if (nome.split(/\s+/).length < 2) return res.status(400).json({ erro: 'Informe seu nome completo.' });
+  if (!['especialista', 'instrutor'].includes(tipo)) return res.status(400).json({ erro: 'Escolha especialista ou instrutor.' });
+  const foto = lerArquivo(req.body.foto, { imagem: true });
+  const usuario = await db.criarUsuario({ cpf: req.cpf, nome, tipo, foto: foto?.url || null });
   res.json({ usuario });
 });
 
 // Turmas
-app.get('/api/turmas', exigirUsuario, (req, res) => {
-  res.json({ turmas: db.turmasDoUsuario(req.usuario.id) });
+app.get('/api/turmas', exigirUsuario, async (req, res) => {
+  res.json({ turmas: await db.turmasDoUsuario(req.usuario.id) });
 });
 
-app.post('/api/turmas', exigirUsuario, (req, res) => {
+app.post('/api/turmas', exigirUsuario, async (req, res) => {
   const t = {
     numero: texto(req.body.numero, 50).trim(),
     cidade: texto(req.body.cidade, 200).trim(),
@@ -200,66 +184,51 @@ app.post('/api/turmas', exigirUsuario, (req, res) => {
   if (!t.numero || !t.cidade || !t.sindicato || !t.periodo) {
     return res.status(400).json({ erro: 'Preencha número, cidade, sindicato rural e período.' });
   }
-  res.json({ turma: db.criarTurma(req.usuario.id, t) });
+  res.json({ turma: await db.criarTurma(req.usuario.id, t) });
 });
 
-function carregarTurma(req, res, next) {
-  const turma = db.turma(Number(req.params.turmaId));
+async function carregarTurma(req, res, next) {
+  const id = Number(req.params.turmaId);
+  const turma = Number.isInteger(id) ? await db.turma(id) : null;
   if (!turma || turma.usuario_id !== req.usuario.id) return res.status(404).json({ erro: 'Turma não encontrada.' });
   req.turma = turma;
   next();
 }
 
-app.get('/api/turmas/:turmaId', exigirUsuario, carregarTurma, (req, res) => {
-  res.json({ turma: req.turma, modulos: db.modulosDaTurma(req.turma.id) });
+app.get('/api/turmas/:turmaId', exigirUsuario, carregarTurma, async (req, res) => {
+  res.json({ turma: req.turma, modulos: await db.modulosDaTurma(req.turma.id) });
 });
 
-app.post(
-  '/api/turmas/:turmaId/modulos/:numero',
-  exigirUsuario,
-  carregarTurma,
-  upload.single('anexo'),
-  (req, res) => {
-    const numero = Number(req.params.numero);
-    if (!(numero >= 1 && numero <= 8)) {
-      removerArquivo(req.file?.filename);
-      return res.status(404).json({ erro: 'Módulo inválido.' });
-    }
-    const instrutor = req.usuario.tipo === 'instrutor';
-    const modulo1Especialista = !instrutor && numero === 1;
+app.post('/api/turmas/:turmaId/modulos/:numero', exigirUsuario, carregarTurma, async (req, res) => {
+  const numero = Number(req.params.numero);
+  if (!(Number.isInteger(numero) && numero >= 1 && numero <= 8)) return res.status(404).json({ erro: 'Módulo inválido.' });
+  const instrutor = req.usuario.tipo === 'instrutor';
+  const modulo1Especialista = !instrutor && numero === 1;
 
-    // Instrutor envia imagem; foto da expedição também é imagem.
-    if (req.file && (instrutor || modulo1Especialista) && !apenasImagem(req.file)) {
-      removerArquivo(req.file.filename);
-      return res.status(400).json({ erro: 'O arquivo precisa ser uma imagem.' });
-    }
+  // Instrutor envia imagem; a foto da expedição também é imagem.
+  const novo = lerArquivo(req.body.anexo, { imagem: instrutor || modulo1Especialista });
 
-    let dados = null;
-    let textoModulo = null;
-    if (modulo1Especialista) {
-      dados = {};
-      for (const c of MODULO1_ESPECIALISTA_CAMPOS) if (c.chave) dados[c.chave] = texto(req.body[c.chave], c.max || MAX_TEXTO);
-    } else {
-      textoModulo = texto(req.body.texto);
-    }
-
-    const anterior = db.modulo(req.turma.id, numero);
-    let anexo = anterior?.anexo || null;
-    let anexoNome = anterior?.anexo_nome || null;
-    if (req.file) {
-      removerArquivo(anexo);
-      anexo = req.file.filename;
-      anexoNome = texto(req.file.originalname, 200);
-    } else if (req.body.removerAnexo === '1') {
-      removerArquivo(anexo);
-      anexo = null;
-      anexoNome = null;
-    }
-
-    db.salvarModulo(req.turma.id, numero, { dados, texto: textoModulo, anexo, anexoNome });
-    res.json({ modulo: db.modulo(req.turma.id, numero) });
+  let dados = null;
+  let textoModulo = null;
+  if (modulo1Especialista) {
+    dados = {};
+    for (const c of MODULO1_ESPECIALISTA_CAMPOS) if (c.chave) dados[c.chave] = texto(req.body[c.chave], c.max || MAX_TEXTO);
+  } else {
+    textoModulo = texto(req.body.texto);
   }
-);
+
+  const anterior = await db.modulo(req.turma.id, numero);
+  let anexo = anterior?.anexo || null;
+  let anexoNome = anterior?.anexo_nome || null;
+  if (novo || req.body.removerAnexo) {
+    if (anexo && anexo !== novo?.url) await arquivos.remover(anexo);
+    anexo = novo?.url || null;
+    anexoNome = novo?.nome || null;
+  }
+
+  const modulo = await db.salvarModulo(req.turma.id, numero, { dados, texto: textoModulo, anexo, anexoNome });
+  res.json({ modulo });
+});
 
 // Admin
 app.post('/api/admin/entrar', (req, res) => {
@@ -271,22 +240,22 @@ app.post('/api/admin/entrar', (req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/api/admin/envios', exigirAdmin, (req, res) => {
-  res.json({ envios: db.todosEnvios(), usuarios: db.todosUsuarios() });
+app.get('/api/admin/envios', exigirAdmin, async (req, res) => {
+  const [envios, usuarios] = await Promise.all([db.todosEnvios(), db.todosUsuarios()]);
+  res.json({ envios, usuarios });
 });
 
-app.post('/api/admin/feedback', exigirAdmin, (req, res) => {
+app.post('/api/admin/feedback', exigirAdmin, async (req, res) => {
   const ids = Array.isArray(req.body.ids) ? req.body.ids.map(Number).filter(Number.isInteger) : [];
   const feedback = texto(req.body.feedback).trim();
   if (!ids.length) return res.status(400).json({ erro: 'Selecione ao menos um envio.' });
   if (!feedback) return res.status(400).json({ erro: 'Escreva o feedback.' });
-  res.json({ atualizados: db.darFeedback(ids, feedback) });
+  res.json({ atualizados: await db.darFeedback(ids, feedback) });
 });
 
 app.use((err, req, res, next) => {
-  if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
-    return res.status(400).json({ erro: 'Arquivo maior que 5MB.' });
-  }
+  if (err.status && err.status < 500) return res.status(err.status).json({ erro: err.message });
+  if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ erro: 'Arquivo maior que 5MB.' });
   console.error(err);
   res.status(500).json({ erro: 'Erro interno.' });
 });
@@ -295,4 +264,6 @@ if (require.main === module) {
   app.listen(PORT, () => console.log(`Rodando em http://localhost:${PORT}`));
 }
 
-module.exports = { app, cpfValido };
+module.exports = app;
+module.exports.app = app;
+module.exports.cpfValido = cpfValido;
