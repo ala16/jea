@@ -136,8 +136,10 @@ function avatar(foto, classe = '') {
 function topoDoUsuario(u) {
   desenharTopo(`<nav class="menu">
       <a href="#/painel" data-area="painel turma">Minhas turmas</a>
+      <a href="#/material" data-area="material">Material</a>
       <a href="#/avisos" data-area="avisos">Avisos<span class="badge" id="badge-avisos" hidden></span></a>
       <a href="#/forum/geral" data-area="forum">Fórum</a>
+      <a href="#/perguntas" data-area="perguntas">Perguntas</a>
     </nav>
     <div class="usuario">
       <a class="meu-perfil" href="#/perfil" title="Editar meu perfil">${avatar(u.foto)}<span>${esc(u.nome.split(' ')[0])} · ${u.tipo === 'especialista' ? 'Especialista' : 'Instrutor'}</span><span class="lapis" aria-hidden="true">✎</span></a>
@@ -151,9 +153,20 @@ function topoDoAdmin() {
   desenharTopo(`<nav class="menu">
       <a href="#/admin" data-area="admin">Envios</a>
       <a href="#/admin-avisos" data-area="admin-avisos">Avisos</a>
+      <a href="#/material" data-area="material">Material</a>
+      <a href="#/perguntas" data-area="perguntas">Perguntas<span class="badge" id="badge-perguntas" hidden></span></a>
       <a href="#/forum/geral" data-area="forum">Fórum</a>
     </nav>
     <div class="usuario"><span>Admin</span><button data-sair>Sair</button></div>`);
+  api('/api/perguntas').then(({ perguntas }) => mostrarPendentes(perguntas)).catch(() => {});
+}
+
+function mostrarPendentes(perguntas) {
+  const badge = document.getElementById('badge-perguntas');
+  if (!badge) return;
+  const n = perguntas.filter((p) => !p.resposta).length;
+  badge.textContent = n;
+  badge.hidden = !n;
 }
 
 // ---------- avisos (lidos ficam guardados no navegador) ----------
@@ -796,6 +809,217 @@ async function telaVerPerfil(id) {
     </div>`;
 }
 
+// ---------- material ----------
+
+const CATEGORIAS = [
+  { chave: 'geral', nome: 'Material geral', desc: 'Para todos.' },
+  { chave: 'especialista', nome: 'Material do especialista', desc: 'Instrutores também podem ver.' },
+  { chave: 'instrutor', nome: 'Material do instrutor', desc: 'Especialistas também podem ver.' },
+];
+
+function tipoDeLink(url) {
+  if (/drive\.google|docs\.google/.test(url)) return 'Google Drive';
+  if (/youtube\.com|youtu\.be/.test(url)) return 'YouTube';
+  if (/\.pdf($|\?)/i.test(url)) return 'PDF';
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return 'Link'; }
+}
+
+async function telaMaterial() {
+  const minhaRota = rotaAtual;
+  const leitor = await leitorDoForum();
+  if (!leitor) return;
+  let dados;
+  try {
+    dados = await api('/api/materiais');
+  } catch (err) {
+    if (err.status === 401) return ir('#/');
+    throw err;
+  }
+  if (minhaRota !== rotaAtual) return;
+  const { materiais, admin } = dados;
+  app.innerHTML = `
+    <h1>Material</h1>
+    <p class="sub">Cartilhas, arquivos do Google Drive e outros materiais de apoio. ${admin ? 'Só você (admin) pode adicionar ou apagar.' : 'Clique em <strong>Abrir</strong> para ver o material.'}</p>
+    ${admin ? `
+      <details class="cartao novo-topico" ${materiais.length ? '' : 'open'}>
+        <summary>+ Adicionar material</summary>
+        <form id="f">
+          <label for="titulo">Nome do material</label>
+          <input id="titulo" name="titulo" type="text" maxlength="200" placeholder="Ex.: Cartilha do módulo 1" required>
+          <label for="url">Link</label>
+          <input id="url" name="url" type="text" inputmode="url" maxlength="2000" placeholder="Cole aqui o link do Google Drive, PDF, vídeo..." required>
+          <label for="descricao">Descrição <span class="ajuda">(opcional)</span></label>
+          <input id="descricao" name="descricao" type="text" maxlength="1000">
+          <label>Categoria</label>
+          <div class="opcoes">
+            ${CATEGORIAS.map((c, i) => `<label><input type="radio" name="categoria" value="${c.chave}" ${i ? '' : 'checked'}>${c.nome.replace('Material ', '').replace(/^./, (l) => l.toUpperCase())}</label>`).join('')}
+          </div>
+          <p class="ajuda" style="margin-top:8px">Confira se o link do Google Drive está compartilhado como "Qualquer pessoa com o link".</p>
+          <div class="erro" id="erro"></div>
+          <div class="linha-botoes"><button type="submit">Adicionar</button></div>
+        </form>
+      </details>` : ''}
+    <nav class="abas" id="filtro">
+      <a href="#" data-cat="" class="ativa">Todos (${materiais.length})</a>
+      ${CATEGORIAS.map((c) => `<a href="#" data-cat="${c.chave}">${c.nome.replace('Material ', '').replace(/^./, (l) => l.toUpperCase())} (${materiais.filter((m) => m.categoria === c.chave).length})</a>`).join('')}
+    </nav>
+    <div id="lista"></div>`;
+
+  const lista = document.getElementById('lista');
+  const desenhar = (cat) => {
+    lista.innerHTML = CATEGORIAS.filter((c) => !cat || c.chave === cat).map((c) => {
+      const itens = materiais.filter((m) => m.categoria === c.chave);
+      if (!itens.length && !cat) return '';
+      return `<section class="categoria">
+        <h2>${c.nome} <span class="meta">${esc(c.desc)}</span></h2>
+        ${itens.map((m) => `
+          <div class="cartao material">
+            <div>
+              <h3>${esc(m.titulo)}</h3>
+              ${m.descricao ? `<p class="meta" style="margin:0">${esc(m.descricao)}</p>` : ''}
+              <span class="tag">${esc(tipoDeLink(m.url))}</span>
+              ${admin ? `<button class="link perigo" data-apagar-material="${m.id}">apagar</button>` : ''}
+            </div>
+            <a class="botao" href="${esc(m.url)}" target="_blank" rel="noopener">Abrir ↗</a>
+          </div>`).join('') || '<div class="vazio">Nenhum material nesta categoria ainda.</div>'}
+      </section>`;
+    }).join('') || '<div class="vazio">Nenhum material publicado ainda.</div>';
+  };
+  desenhar('');
+  document.getElementById('filtro').onclick = (ev) => {
+    const a = ev.target.closest('[data-cat]');
+    if (!a) return;
+    ev.preventDefault();
+    document.querySelectorAll('#filtro a').forEach((x) => x.classList.toggle('ativa', x === a));
+    desenhar(a.dataset.cat);
+  };
+
+  if (!admin) return;
+  app.onclick = async (ev) => {
+    const b = ev.target.closest('[data-apagar-material]');
+    if (!b || !confirm('Apagar este material?')) return;
+    try {
+      await api(`/api/admin/materiais/${b.dataset.apagarMaterial}`, { method: 'DELETE' });
+      avisar('Material apagado.');
+      telaMaterial();
+    } catch (err) {
+      avisar(err.message);
+    }
+  };
+  const f = document.getElementById('f');
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const botao = f.querySelector('button[type=submit]');
+    if (botao.disabled) return;
+    botao.disabled = true;
+    try {
+      await api('/api/admin/materiais', { json: Object.fromEntries(new FormData(f)) });
+      avisar('Material adicionado.');
+      telaMaterial();
+    } catch (err) {
+      document.getElementById('erro').textContent = err.message;
+      botao.disabled = false;
+    }
+  };
+}
+
+// ---------- perguntas ao admin ----------
+
+async function telaPerguntas() {
+  const minhaRota = rotaAtual;
+  const leitor = await leitorDoForum();
+  if (!leitor) return;
+  let dados;
+  try {
+    dados = await api('/api/perguntas');
+  } catch (err) {
+    if (err.status === 401) return ir('#/');
+    throw err;
+  }
+  if (minhaRota !== rotaAtual) return;
+  const { perguntas, admin } = dados;
+  const pendentes = perguntas.filter((p) => !p.resposta).length;
+
+  const cartao = (p) => `
+    <div class="cartao pergunta ${p.resposta ? '' : 'pendente'}">
+      <div class="meta">
+        ${admin ? `${autor({ usuario_id: p.usuario_id, autor: p.nome, autor_tipo: p.tipo, autor_foto: p.foto })} · ` : ''}${esc(formatarData(p.criado_em))}
+        · <span class="tag ${p.resposta ? 'sim' : 'novo'}">${p.resposta ? 'Respondida' : 'Aguardando resposta'}</span>
+        ${admin ? `<button class="link perigo" data-apagar-pergunta="${p.id}">apagar</button>` : ''}
+      </div>
+      <div class="mensagem"><strong>Pergunta:</strong> ${esc(p.texto)}</div>
+      ${p.resposta ? `<div class="feedback" style="margin:12px 0 0"><strong>Resposta do admin (${esc(formatarData(p.respondida_em))}):</strong>\n${esc(p.resposta)}</div>` : ''}
+      ${admin ? `
+        <form class="responder" data-id="${p.id}">
+          <label style="margin-top:12px">${p.resposta ? 'Alterar resposta' : 'Sua resposta'}</label>
+          <textarea name="resposta" maxlength="${MAX}">${esc(p.resposta || '')}</textarea>
+          <div class="linha-botoes" style="margin-top:8px"><button type="submit">${p.resposta ? 'Salvar resposta' : 'Responder'}</button></div>
+        </form>` : ''}
+    </div>`;
+
+  app.innerHTML = admin ? `
+    <h1>Perguntas</h1>
+    <p class="sub">${pendentes ? `${pendentes} pergunta${pendentes === 1 ? '' : 's'} aguardando resposta.` : 'Nenhuma pergunta aguardando resposta.'} A resposta aparece só para quem perguntou.</p>
+    ${perguntas.map(cartao).join('') || '<div class="vazio">Ninguém fez perguntas ainda.</div>'}` : `
+    <h1>Perguntas ao admin</h1>
+    <p class="sub">Tem alguma dúvida? Escreva aqui. Só você e o admin veem a pergunta e a resposta.</p>
+    <form id="f" class="cartao">
+      <label for="texto" style="margin-top:0">Sua pergunta</label>
+      <textarea id="texto" name="texto" maxlength="${MAX}" placeholder="Escreva sua dúvida" required></textarea>
+      <div class="contador"></div>
+      <div class="erro" id="erro"></div>
+      <div class="linha-botoes"><button type="submit">Enviar pergunta</button></div>
+    </form>
+    <h2>Minhas perguntas ${perguntas.length ? `<span class="meta">(${perguntas.length})</span>` : ''}</h2>
+    ${perguntas.map(cartao).join('') || '<div class="vazio">Você ainda não fez perguntas.</div>'}`;
+
+  if (admin) {
+    mostrarPendentes(perguntas);
+    app.onsubmit = async (ev) => {
+      const form = ev.target.closest('form.responder');
+      if (!form) return;
+      ev.preventDefault();
+      const botao = form.querySelector('button');
+      botao.disabled = true;
+      try {
+        await api(`/api/admin/perguntas/${form.dataset.id}/resposta`, { json: { resposta: form.resposta.value } });
+        avisar('Resposta enviada.');
+        telaPerguntas();
+      } catch (err) {
+        avisar(err.message);
+        botao.disabled = false;
+      }
+    };
+    app.onclick = async (ev) => {
+      const b = ev.target.closest('[data-apagar-pergunta]');
+      if (!b || !confirm('Apagar esta pergunta?')) return;
+      try {
+        await api(`/api/admin/perguntas/${b.dataset.apagarPergunta}`, { method: 'DELETE' });
+        telaPerguntas();
+      } catch (err) {
+        avisar(err.message);
+      }
+    };
+    return;
+  }
+  const f = document.getElementById('f');
+  contador(f.texto);
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const botao = f.querySelector('button[type=submit]');
+    if (botao.disabled) return;
+    botao.disabled = true;
+    try {
+      await api('/api/perguntas', { json: { texto: f.texto.value } });
+      avisar('Pergunta enviada. A resposta vai aparecer aqui.');
+      telaPerguntas();
+    } catch (err) {
+      document.getElementById('erro').textContent = err.message;
+      botao.disabled = false;
+    }
+  };
+}
+
 // ---------- telas de avisos ----------
 
 async function telaAvisos() {
@@ -1061,6 +1285,7 @@ async function telaTopico(id) {
 
 async function rotear() {
   app.onclick = null;
+  app.onsubmit = null;
   rotaAtual++;
   const partes = location.hash.replace(/^#\/?/, '').split('/');
   try {
@@ -1071,6 +1296,8 @@ async function rotear() {
       case 'turma': return await telaTurma(partes[1], partes[2]);
       case 'admin': return await telaAdmin();
       case 'avisos': return await telaAvisos();
+      case 'material': return await telaMaterial();
+      case 'perguntas': return await telaPerguntas();
       case 'perfil': return partes[1] ? await telaVerPerfil(partes[1]) : await telaPerfil();
       case 'admin-avisos': return await telaAdminAvisos();
       case 'forum':

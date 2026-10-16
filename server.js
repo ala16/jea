@@ -388,6 +388,54 @@ app.delete('/api/admin/avisos/:id', exigirAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
+// Materiais: só o admin publica; todos os cadastrados veem as três categorias.
+const CATEGORIAS = ['geral', 'especialista', 'instrutor'];
+
+app.get('/api/materiais', exigirLeitorForum, async (req, res) => {
+  res.json({ materiais: await db.materiais(), admin: Boolean(req.admin) });
+});
+
+app.post('/api/admin/materiais', exigirAdmin, async (req, res) => {
+  const titulo = texto(req.body.titulo, 200).trim();
+  const descricao = texto(req.body.descricao, 1000).trim();
+  const categoria = CATEGORIAS.includes(req.body.categoria) ? req.body.categoria : 'geral';
+  if (!titulo) return res.status(400).json({ erro: 'Escreva o nome do material.' });
+  if (!texto(req.body.url).trim()) return res.status(400).json({ erro: 'Cole o link do material.' });
+  const url = lerLink(req.body.url);
+  res.json({ material: await db.criarMaterial({ categoria, titulo, descricao, url }) });
+});
+
+app.delete('/api/admin/materiais/:id', exigirAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || !(await db.excluirMaterial(id))) return res.status(404).json({ erro: 'Material não encontrado.' });
+  res.json({ ok: true });
+});
+
+// Perguntas ao admin: a pessoa vê só as suas; o admin vê todas e responde.
+app.get('/api/perguntas', exigirLeitorForum, async (req, res) => {
+  res.json({ perguntas: await db.perguntas(req.admin ? null : req.usuario.id), admin: Boolean(req.admin) });
+});
+
+app.post('/api/perguntas', exigirUsuario, async (req, res) => {
+  const corpo = texto(req.body.texto).trim();
+  if (!corpo) return res.status(400).json({ erro: 'Escreva sua pergunta.' });
+  res.json({ pergunta: await db.criarPergunta(req.usuario.id, corpo) });
+});
+
+app.post('/api/admin/perguntas/:id/resposta', exigirAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  const resposta = texto(req.body.resposta).trim();
+  if (!resposta) return res.status(400).json({ erro: 'Escreva a resposta.' });
+  if (!Number.isInteger(id) || !(await db.responderPergunta(id, resposta))) return res.status(404).json({ erro: 'Pergunta não encontrada.' });
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/perguntas/:id', exigirAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || !(await db.excluirPergunta(id))) return res.status(404).json({ erro: 'Pergunta não encontrada.' });
+  res.json({ ok: true });
+});
+
 // Admin
 app.post('/api/admin/entrar', (req, res) => {
   if (!ADMIN_PASSWORD) return res.status(503).json({ erro: 'Acesso admin não configurado (defina ADMIN_PASSWORD).' });
