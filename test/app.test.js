@@ -78,7 +78,7 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
   r = await a('/api/entrar', { json: { cpf: CPF_A } });
   assert.equal(r.body.primeiroAcesso, false);
 
-  r = await a('/api/turmas', { json: { numero: '12', cidade: 'Goiânia', sindicato: 'SR Goiânia', periodo: 'sáb 8h-12h' } });
+  r = await a('/api/turmas', { json: { cidade: 'Goiânia', sindicato: 'SR Goiânia', horario: 'sáb 8h-12h' } });
   const turmaId = r.body.turma.id;
 
   // Módulo 1 do especialista: só aceita imagem
@@ -108,7 +108,7 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
   const b = cliente();
   await b('/api/entrar', { json: { cpf: CPF_B } });
   await b('/api/cadastro', { json: { nome: 'João Souza', tipo: 'instrutor' } });
-  r = await b('/api/turmas', { json: { numero: '7', cidade: 'Rio Verde', sindicato: 'SR Rio Verde', periodo: 'noite' } });
+  r = await b('/api/turmas', { json: { cidade: 'Rio Verde', sindicato: 'SR Rio Verde', horario: 'noite' } });
   const turmaB = r.body.turma.id;
   const pdfB = await subir(b, '%PDF', 'application/pdf', 'doc.pdf');
   assert.equal((await b(`/api/turmas/${turmaB}/modulos/3`, { json: { texto: 'x', anexo: pdfB } })).status, 400);
@@ -136,4 +136,10 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
 
   r = await a(`/api/turmas/${turmaId}`);
   assert.ok(r.body.modulos.every((m) => m.feedback === 'Muito bom!'));
+
+  // Excluir turma: só o dono, e some da lista
+  assert.equal((await b(`/api/turmas/${turmaId}`, { method: 'DELETE' })).status, 404);
+  assert.equal((await a(`/api/turmas/${turmaId}`, { method: 'DELETE' })).status, 200);
+  assert.equal((await a('/api/turmas')).body.turmas.length, 0);
+  assert.equal((await a(anexo)).status, 404);
 });
