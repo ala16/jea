@@ -207,7 +207,8 @@ function lerEmail(v) {
 function lerRedes(v) {
   const redes = {};
   const whatsapp = lerWhatsapp(v?.whatsapp);
-  if (whatsapp) redes.whatsapp = whatsapp;
+  if (!whatsapp) throw erro400('Informe seu WhatsApp com DDD.');
+  redes.whatsapp = whatsapp;
   for (const r of REDES) {
     const link = lerLink(v?.[r]);
     if (link) redes[r] = link;
@@ -228,7 +229,7 @@ function lerLink(v) {
   }
 }
 
-// Primeiro acesso: nome, e-mail e tipo são obrigatórios; foto e redes, opcionais.
+// Primeiro acesso: nome, e-mail, WhatsApp e tipo são obrigatórios; foto e redes, opcionais.
 app.post('/api/cadastro', exigirCpf, async (req, res) => {
   if (req.usuario) return res.status(400).json({ erro: 'Cadastro já realizado.' });
   const nome = lerNome(req.body.nome);

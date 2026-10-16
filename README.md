@@ -41,7 +41,7 @@ ADMIN_PASSWORD=sua-senha npm start
 
 ## Funcionalidades
 
-- **Entrada por CPF** (com validação dos dígitos). No primeiro acesso a pessoa informa nome completo, e-mail e se é especialista ou instrutor (obrigatórios); foto, WhatsApp e redes sociais são opcionais e podem ser preenchidos depois no perfil.
+- **Entrada por CPF** (com validação dos dígitos). No primeiro acesso a pessoa informa nome completo, e-mail, WhatsApp e se é especialista ou instrutor (obrigatórios); foto e redes sociais são opcionais e podem ser preenchidos depois no perfil.
 - **Painel**: cadastra quantas turmas quiser (cidade, sindicato rural e horário).
 - **8 módulos por turma**:
   - Especialista, módulo 1: Planejamento (título, missão, objetivo, metas, valores, visão, cronograma, orçamento) e Expedição do Agro (local, data, objetivo, resultado, foto).

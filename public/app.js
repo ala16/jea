@@ -276,12 +276,15 @@ const OBRIG = '<span class="obrig" aria-hidden="true">*</span>';
 const OPCIONAL = '<span class="tag-opcional">opcional</span>';
 
 // Campos de WhatsApp e redes sociais, usados no cadastro e no perfil.
+function campoWhatsapp(redes = {}) {
+  return `<label for="r_whatsapp">WhatsApp ${OBRIG} <span class="ajuda">(só o número com DDD)</span></label>
+    <input id="r_whatsapp" name="whatsapp" type="tel" inputmode="numeric" maxlength="16" autocomplete="tel-national" placeholder="(16) 99999-8888" value="${esc(redes.whatsapp ? formatarWhatsapp(redes.whatsapp) : '')}" required>`;
+}
+
+// Links das redes sociais (opcionais), usados no cadastro e no perfil.
 function camposRedes(redes = {}) {
   return `<div class="grade">
-    ${REDES.map((r) => r.chave === 'whatsapp'
-      ? `<div><label for="r_whatsapp">WhatsApp ${OPCIONAL}</label>
-        <input id="r_whatsapp" name="whatsapp" type="tel" inputmode="numeric" maxlength="16" placeholder="${r.exemplo}" value="${esc(redes.whatsapp ? formatarWhatsapp(redes.whatsapp) : '')}"></div>`
-      : `<div><label for="r_${r.chave}">${r.nome} ${OPCIONAL}</label>
+    ${REDES.filter((r) => r.chave !== 'whatsapp').map((r) => `<div><label for="r_${r.chave}">${r.nome} ${OPCIONAL}</label>
         <input id="r_${r.chave}" name="${r.chave}" type="text" inputmode="url" maxlength="300" placeholder="${r.exemplo}" value="${esc(redes[r.chave] || '')}"></div>`).join('')}
   </div>`;
 }
@@ -306,6 +309,7 @@ async function telaCadastro() {
         <input id="nome" name="nome" type="text" maxlength="200" autocomplete="name" required>
         <label for="email">E-mail ${OBRIG}</label>
         <input id="email" name="email" type="email" maxlength="200" autocomplete="email" placeholder="seunome@email.com" required>
+        ${campoWhatsapp()}
         <label for="cpf">CPF ${OBRIG}</label>
         <input id="cpf" type="text" value="${esc(mascaraCpf(r.cpf))}" disabled>
         <label>Você é ${OBRIG}</label>
@@ -315,7 +319,7 @@ async function telaCadastro() {
         </div>
         <div class="secao-form">
           <h2>Opcional</h2>
-          <p class="ajuda">Pode deixar em branco e completar depois em Meu perfil. No WhatsApp, digite só o número com DDD; nas redes, cole o link do seu perfil.</p>
+          <p class="ajuda">Pode deixar em branco e completar depois em Meu perfil. Nas redes, cole o link do seu perfil.</p>
           <label for="foto">Foto do perfil ${OPCIONAL} <span class="ajuda">(até 5MB)</span></label>
           <div class="foto-perfil"><span class="avatar grande" id="previa"></span><input id="foto" name="foto" type="file" accept="image/*"></div>
           ${camposRedes()}
@@ -337,6 +341,7 @@ async function telaCadastro() {
     const erro = document.getElementById('erro');
     const falta = !f.nome.value.trim() ? 'Informe seu nome completo.'
       : !f.email.value.trim() ? 'Informe seu e-mail.'
+      : !f.whatsapp.value.trim() ? 'Informe seu WhatsApp com DDD.'
       : !f.tipo.value ? 'Escolha se você é especialista ou instrutor.' : '';
     if (falta) { erro.textContent = falta; return; }
     const botao = f.querySelector('button[type=submit]');
@@ -374,6 +379,68 @@ function barraProgresso(n) {
   return `<div class="progresso" title="${n} de 8 módulos enviados"><span style="width:${(n / 8) * 100}%"></span></div>`;
 }
 
+// Horário: lista de 30 em 30 minutos, mas a pessoa também pode digitar.
+const HORAS = Array.from({ length: 36 }, (_, i) => {
+  const m = 5 * 60 + i * 30;
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+});
+
+function campoHora(nome, exemplo) {
+  return `<input id="${nome}" name="${nome}" type="text" inputmode="numeric" list="horas" maxlength="5" autocomplete="off" placeholder="Ex.: ${exemplo}" required>`;
+}
+
+// Enquanto digita: só números e dois pontos; com 4 números põe o ':' (0730 -> 07:30).
+function mascaraHora(v) {
+  if (v.includes(':')) {
+    const [h, m = ''] = v.replace(/[^\d:]/g, '').split(':');
+    return `${h.slice(0, 2)}:${m.slice(0, 2)}`;
+  }
+  const n = v.replace(/\D/g, '').slice(0, 4);
+  return n.length === 4 ? `${n.slice(0, 2)}:${n.slice(2)}` : n;
+}
+
+// Ao sair do campo: 8 -> 08:00, 830 -> 08:30, 13h -> 13:00. Retorna '' se inválido.
+function normalizarHora(v) {
+  v = String(v).trim();
+  const n = v.replace(/\D/g, '');
+  if (!n) return '';
+  let h; let m;
+  const partes = v.match(/^(\d{1,2})\s*[:hH]\s*(\d{0,2})/);
+  if (partes) { h = +partes[1]; m = +(partes[2] || 0); } else if (n.length <= 2) { h = +n; m = 0; } else if (n.length === 3) { h = +n[0]; m = +n.slice(1); } else { h = +n.slice(0, 2); m = +n.slice(2, 4); }
+  if (h > 23 || m > 59) return '';
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+function ligarHorario(f) {
+  const resumo = document.getElementById('resumo-horario');
+  const atualizar = () => {
+    const e = normalizarHora(f.entrada.value);
+    const s = normalizarHora(f.saida.value);
+    if (!e || !s || f.entrada.value.length < 5 || f.saida.value.length < 5) { resumo.hidden = true; return; }
+    const min = (+s.slice(0, 2) * 60 + +s.slice(3)) - (+e.slice(0, 2) * 60 + +e.slice(3));
+    resumo.hidden = false;
+    resumo.classList.toggle('erro', min <= 0);
+    resumo.textContent = min <= 0
+      ? 'A saída precisa ser depois da entrada.'
+      : `Aula das ${e} às ${s} (${Math.floor(min / 60)}h${min % 60 ? String(min % 60).padStart(2, '0') : ''}).`;
+  };
+  for (const campo of [f.entrada, f.saida]) {
+    campo.oninput = (ev) => {
+      // Escolher na lista já vem com ":"; digitando, a máscara coloca.
+      if (!ev.inputType?.startsWith('delete')) campo.value = mascaraHora(campo.value);
+      campo.setCustomValidity('');
+      atualizar();
+    };
+    campo.onblur = () => {
+      if (!campo.value) return;
+      const h = normalizarHora(campo.value);
+      if (h) campo.value = h;
+      campo.setCustomValidity(h ? '' : 'Horário inválido. Use o formato 08:00.');
+      atualizar();
+    };
+  }
+}
+
 async function telaPainel() {
   const u = await exigirUsuario();
   if (!u) return;
@@ -392,14 +459,18 @@ async function telaPainel() {
       <p class="ajuda">Preencha os 3 campos e clique em <strong>Salvar turma</strong>.</p>
       <form id="f">
         <div class="grade">
-          <div><label for="cidade">Cidade</label><input id="cidade" name="cidade" type="text" maxlength="200" placeholder="Ex.: Ribeirão Preto" required></div>
-          <div><label for="sindicato">Sindicato rural</label><input id="sindicato" name="sindicato" type="text" maxlength="200" placeholder="Ex.: Sindicato Rural de Ribeirão Preto" required></div>
+          <div><label for="cidade">Cidade</label><input id="cidade" name="cidade" type="text" maxlength="200" placeholder="Ex.: Atibaia" required></div>
+          <div><label for="sindicato">Sindicato rural</label><input id="sindicato" name="sindicato" type="text" maxlength="200" placeholder="Ex.: Sindicato Rural de Atibaia" required></div>
         </div>
         <label>Horário da aula</label>
+        <p class="ajuda">Escolha na lista ou digite só os números (ex.: 0730 vira 07:30).</p>
         <div class="horario">
-          <label>Entrada<input id="entrada" type="time" required></label>
-          <label>Saída<input id="saida" type="time" required></label>
+          <label>Entrada${campoHora('entrada', '08:00')}</label>
+          <span class="horario-ate">às</span>
+          <label>Saída${campoHora('saida', '12:00')}</label>
         </div>
+        <p class="horario-resumo" id="resumo-horario" hidden></p>
+        <datalist id="horas">${HORAS.map((h) => `<option value="${h}">`).join('')}</datalist>
         <div class="erro" id="erro"></div>
         <div class="linha-botoes">
           <button type="submit">Salvar turma</button>
@@ -438,8 +509,7 @@ async function telaPainel() {
   nova.onclick = () => abrir(true);
   document.getElementById('cancelar').onclick = () => { f.reset(); abrir(false); };
   if (!turmas.length) abrir(true);
-  // Clicar em qualquer parte do campo abre o relógio do navegador.
-  f.querySelectorAll('input[type=time]').forEach((i) => (i.onclick = () => i.showPicker?.()));
+  ligarHorario(f);
   f.onsubmit = async (e) => {
     e.preventDefault();
     const botao = f.querySelector('button[type=submit]');
@@ -447,9 +517,17 @@ async function telaPainel() {
     botao.disabled = true;
     try {
       document.getElementById('erro').textContent = '';
-      if (f.saida.value <= f.entrada.value) throw new Error('O horário de saída precisa ser depois da entrada.');
+      const entrada = normalizarHora(f.entrada.value);
+      const saida = normalizarHora(f.saida.value);
+      if (!entrada) throw new Error('Informe o horário de entrada, ex.: 08:00.');
+      if (!saida) throw new Error('Informe o horário de saída, ex.: 12:00.');
+      if (saida <= entrada) throw new Error('O horário de saída precisa ser depois da entrada.');
+      f.entrada.value = entrada;
+      f.saida.value = saida;
       const dados = Object.fromEntries(new FormData(f));
-      dados.horario = `${f.entrada.value} às ${f.saida.value}`;
+      delete dados.entrada;
+      delete dados.saida;
+      dados.horario = `${entrada} às ${saida}`;
       const { turma } = await api('/api/turmas', { json: dados });
       avisar('Turma cadastrada. Agora preencha o módulo 1.');
       ir(`#/turma/${turma.id}/1`);
@@ -872,11 +950,12 @@ async function telaPerfil() {
   const u = await exigirUsuario();
   if (!u) return;
   const redes = u.redes || {};
+  const faltando = [!u.email && 'o seu e-mail', !redes.whatsapp && 'o seu WhatsApp'].filter(Boolean);
   app.innerHTML = `
     <p><a href="#/painel">← Minhas turmas</a></p>
     <h1>Meu perfil</h1>
-    <p class="sub">Os campos com ${OBRIG} são obrigatórios; o resto é opcional. Seu e-mail e CPF só o gestor vê.</p>
-    ${u.email ? '' : '<p class="alerta-email">Falta o seu e-mail. Preencha abaixo e salve o perfil.</p>'}
+    <p class="sub">Os campos com ${OBRIG} são obrigatórios; o resto é opcional. Seu e-mail e CPF só o gestor vê; o WhatsApp aparece no seu perfil.</p>
+    ${faltando.length ? `<p class="alerta-email">Falta ${faltando.join(' e ')}. Preencha abaixo e salve o perfil.</p>` : ''}
     <form id="f" class="cartao">
       <label style="margin-top:0">Foto do perfil ${OPCIONAL} <span class="ajuda">(até 5MB)</span></label>
       <div class="foto-perfil">
@@ -890,10 +969,11 @@ async function telaPerfil() {
       <input id="nome" name="nome" type="text" maxlength="200" value="${esc(u.nome)}" required>
       <label for="email">E-mail ${OBRIG}</label>
       <input id="email" name="email" type="email" maxlength="200" autocomplete="email" placeholder="seunome@email.com" value="${esc(u.email || '')}" required>
+      ${campoWhatsapp(redes)}
       <label>Perfil</label>
       <p class="meta" style="margin:0">${u.tipo === 'especialista' ? 'Especialista' : 'Instrutor'} · CPF ${esc(mascaraCpf(u.cpf))}</p>
       <h2>Redes sociais ${OPCIONAL}</h2>
-      <p class="ajuda">No WhatsApp, digite só o número com DDD. Nas redes, cole o link do seu perfil. Deixe em branco o que não usa.</p>
+      <p class="ajuda">Cole o link do seu perfil. Deixe em branco o que não usa.</p>
       ${camposRedes(redes)}
       <div class="erro" id="erro"></div>
       <div class="linha-botoes">

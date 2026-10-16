@@ -93,12 +93,12 @@ th { background: #eef2ef; font-weight: 600; }
 .barra-feedback { position: sticky; bottom: 0; background: var(--fundo); padding: 12px 0; }
 .link { background: none; border: 0; color: var(--verde); padding: 0; font-weight: 600; text-decoration: underline; }
 
-.horario { display: flex; gap: 10px; }
-.horario label { flex: 1; margin: 0; font-weight: 400; font-size: 14px; color: var(--suave); }
-.horario input[type=time] {
-  display: block; width: 100%; margin-top: 4px; padding: 10px 12px; font: inherit; color: var(--texto);
-  border: 1px solid var(--borda); border-radius: 8px; background: #fff; cursor: pointer;
-}
+.horario { display: flex; gap: 10px; align-items: flex-end; }
+.horario label { flex: 1; margin: 0; font-weight: 600; font-size: 14px; color: var(--texto); }
+.horario input { display: block; width: 100%; margin-top: 4px; font-size: 18px; letter-spacing: .5px; }
+.horario-ate { padding-bottom: 12px; color: var(--suave); }
+.horario-resumo { margin: 8px 0 0; font-size: 14px; color: var(--verde); font-weight: 600; }
+.horario-resumo.erro { color: #c0392b; }
 
 .topo { flex-wrap: wrap; }
 .avatar.pequeno { width: 22px; height: 22px; display: inline-block; vertical-align: middle; }
