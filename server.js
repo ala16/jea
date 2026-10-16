@@ -105,7 +105,7 @@ async function exigirUsuario(req, res, next) {
 }
 
 function exigirAdmin(req, res, next) {
-  if (!sessao(req).admin) return res.status(401).json({ erro: 'Acesso restrito ao admin.' });
+  if (!sessao(req).admin) return res.status(401).json({ erro: 'Acesso restrito ao gestor.' });
   next();
 }
 
@@ -186,7 +186,18 @@ app.post('/api/cadastro', exigirCpf, async (req, res) => {
 });
 
 // Perfil: a pessoa edita nome, foto e redes sociais. O perfil (tipo) não muda.
-const REDES = ['instagram', 'facebook', 'linkedin', 'youtube', 'site'];
+const REDES = ['instagram', 'facebook', 'linkedin', 'site'];
+
+// WhatsApp: guarda só os números, com o 55 do Brasil (ex.: 5516999998888).
+function lerWhatsapp(v) {
+  let n = texto(v, 40).replace(/\D/g, '');
+  if (!n) return '';
+  if (n.length === 10 || n.length === 11) n = `55${n}`;
+  if (n.length < 12 || n.length > 13) {
+    throw Object.assign(new Error('WhatsApp inválido. Digite o DDD e o número, ex.: (16) 99999-8888.'), { status: 400 });
+  }
+  return n;
+}
 
 function lerLink(v) {
   let s = texto(v, 300).trim();
@@ -205,6 +216,8 @@ app.post('/api/perfil', exigirUsuario, async (req, res) => {
   const nome = texto(req.body.nome, 200).trim();
   if (nome.split(/\s+/).length < 2) return res.status(400).json({ erro: 'Informe seu nome completo.' });
   const redes = {};
+  const whatsapp = lerWhatsapp(req.body.redes?.whatsapp);
+  if (whatsapp) redes.whatsapp = whatsapp;
   for (const r of REDES) {
     const link = lerLink(req.body.redes?.[r]);
     if (link) redes[r] = link;
@@ -470,7 +483,7 @@ app.delete('/api/admin/perguntas/:id', exigirAdmin, async (req, res) => {
 
 // Admin
 app.post('/api/admin/entrar', (req, res) => {
-  if (!ADMIN_PASSWORD) return res.status(503).json({ erro: 'Acesso admin não configurado (defina ADMIN_PASSWORD).' });
+  if (!ADMIN_PASSWORD) return res.status(503).json({ erro: 'Acesso do gestor não configurado (defina ADMIN_PASSWORD).' });
   const a = crypto.createHash('sha256').update(String(req.body.senha || '')).digest();
   const b = crypto.createHash('sha256').update(ADMIN_PASSWORD).digest();
   if (!crypto.timingSafeEqual(a, b)) return res.status(401).json({ erro: 'Senha incorreta.' });

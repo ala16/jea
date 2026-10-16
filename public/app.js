@@ -135,15 +135,33 @@ function avatar(foto, classe = '') {
   return foto ? `<img class="avatar ${classe}" src="${esc(foto)}" alt="">` : `<span class="avatar ${classe}"></span>`;
 }
 
+// Ícones do menu (traço simples, herdam a cor do texto).
+const ICONES = {
+  turmas: '<path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M7 9v5c0 1.5 2.2 3 5 3s5-1.5 5-3V9"/>',
+  material: '<path d="M4 5a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2V5z"/><path d="M8 7h6"/>',
+  avisos: '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+  forum: '<path d="M4 4h16v11H8l-4 4V4z"/><path d="M8 9h8M8 12h5"/>',
+  participantes: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.5a6.5 6.5 0 0 1 3.5 5.5"/>',
+  mensagens: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>',
+  perguntas: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6"/><path d="M12 17.5h.01"/>',
+  envios: '<path d="M9 4h6v3H9z"/><path d="M8 5H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2"/><path d="M9 13l2 2 4-4"/>',
+};
+
+function itemMenu(href, area, icone, rotulo, badge) {
+  return `<a href="${href}" data-area="${area}" title="${rotulo}">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONES[icone]}</svg>
+    <span>${rotulo}</span>${badge ? `<span class="badge" id="${badge}" hidden></span>` : ''}</a>`;
+}
+
 function topoDoUsuario(u) {
-  desenharTopo(`<nav class="menu">
-      <a href="#/painel" data-area="painel turma">Minhas turmas</a>
-      <a href="#/material" data-area="material">Material</a>
-      <a href="#/avisos" data-area="avisos">Avisos<span class="badge" id="badge-avisos" hidden></span></a>
-      <a href="#/forum/geral" data-area="forum">Fórum</a>
-      <a href="#/participantes" data-area="participantes">Participantes</a>
-      <a href="#/mensagens" data-area="mensagens">Mensagens<span class="badge" id="badge-mensagens" hidden></span></a>
-      <a href="#/perguntas" data-area="perguntas">Perguntas</a>
+  desenharTopo(`<nav class="menu" aria-label="Menu principal">
+      ${itemMenu('#/painel', 'painel turma', 'turmas', 'Minhas turmas')}
+      ${itemMenu('#/material', 'material', 'material', 'Material')}
+      ${itemMenu('#/avisos', 'avisos', 'avisos', 'Avisos', 'badge-avisos')}
+      ${itemMenu('#/forum/geral', 'forum', 'forum', 'Fórum')}
+      ${itemMenu('#/participantes', 'participantes perfil', 'participantes', 'Participantes')}
+      ${itemMenu('#/mensagens', 'mensagens', 'mensagens', 'Mensagens', 'badge-mensagens')}
+      ${itemMenu('#/perguntas', 'perguntas', 'perguntas', 'Perguntas')}
     </nav>
     <div class="usuario">
       <a class="meu-perfil" href="#/perfil" title="Editar meu perfil">${avatar(u.foto)}<span>${esc(u.nome.split(' ')[0])} · ${u.tipo === 'especialista' ? 'Especialista' : 'Instrutor'}</span><span class="lapis" aria-hidden="true">✎</span></a>
@@ -155,15 +173,15 @@ function topoDoUsuario(u) {
 }
 
 function topoDoAdmin() {
-  desenharTopo(`<nav class="menu">
-      <a href="#/admin" data-area="admin">Envios</a>
-      <a href="#/admin-avisos" data-area="admin-avisos">Avisos</a>
-      <a href="#/material" data-area="material">Material</a>
-      <a href="#/perguntas" data-area="perguntas">Perguntas<span class="badge" id="badge-perguntas" hidden></span></a>
-      <a href="#/forum/geral" data-area="forum">Fórum</a>
-      <a href="#/participantes" data-area="participantes">Participantes</a>
+  desenharTopo(`<nav class="menu" aria-label="Menu principal">
+      ${itemMenu('#/admin', 'admin', 'envios', 'Envios')}
+      ${itemMenu('#/admin-avisos', 'admin-avisos', 'avisos', 'Avisos')}
+      ${itemMenu('#/material', 'material', 'material', 'Material')}
+      ${itemMenu('#/perguntas', 'perguntas', 'perguntas', 'Perguntas', 'badge-perguntas')}
+      ${itemMenu('#/forum/geral', 'forum', 'forum', 'Fórum')}
+      ${itemMenu('#/participantes', 'participantes perfil', 'participantes', 'Participantes')}
     </nav>
-    <div class="usuario"><span>Admin</span><button data-sair>Sair</button></div>`, '#/admin');
+    <div class="usuario"><span>Gestor</span><button data-sair>Sair</button></div>`, '#/admin');
   api('/api/perguntas').then(({ perguntas }) => mostrarPendentes(perguntas)).catch(() => {});
 }
 
@@ -233,7 +251,7 @@ async function telaInicio() {
         <div class="erro" id="erro"></div>
         <button type="submit" class="largo">Entrar</button>
       </form>
-      <p class="rodape-entrada"><a href="#/admin">Acesso admin</a></p>
+      <p class="rodape-entrada"><a href="#/admin">Acesso do gestor</a></p>
     </div>`;
   const cpf = document.getElementById('cpf');
   cpf.addEventListener('input', () => (cpf.value = mascaraCpf(cpf.value)));
@@ -491,7 +509,7 @@ async function telaTurma(turmaId, numero) {
     </nav>
     <div class="cartao">
       <h2 style="margin-top:0">Módulo ${numero}${especial ? ' · Planejamento' : ''}</h2>
-      ${m?.feedback ? `<div class="feedback"><strong>Feedback do admin (${esc(formatarData(m.feedback_em))}):</strong>\n${esc(m.feedback)}</div>` : ''}
+      ${m?.feedback ? `<div class="feedback"><strong>Feedback do gestor (${esc(formatarData(m.feedback_em))}):</strong>\n${esc(m.feedback)}</div>` : ''}
       <p class="meta">${m ? `Enviado em ${esc(formatarData(m.atualizado_em))}` : 'Ainda não enviado.'}</p>
       <form id="f">
         ${especial ? formModulo1Especialista(m) : formModuloSimples(m, instrutor)}
@@ -560,7 +578,7 @@ function telaAdminLogin(erro) {
   desenharTopo('');
   app.innerHTML = `
     <div class="centro cartao">
-      <h1>Acesso admin</h1>
+      <h1>Acesso do gestor</h1>
       <form id="f">
         <label for="senha">Senha</label>
         <input id="senha" type="password" required>
@@ -650,7 +668,7 @@ async function telaAdminUsuario(id) {
     </div>`;
 
   app.innerHTML = `
-    <p><a href="#/admin">← Painel admin</a></p>
+    <p><a href="#/admin">← Painel do gestor</a></p>
     <div class="cartao perfil-publico">
       ${avatar(u.foto, 'enorme')}
       <div>
@@ -738,7 +756,7 @@ async function telaAdmin() {
 
   app.innerHTML = `
     <div class="cabecalho">
-      <div><h1>Painel admin</h1><p class="sub">Veja os envios e dê feedback para vários de uma vez.</p></div>
+      <div><h1>Painel do gestor</h1><p class="sub">Veja os envios e dê feedback para vários de uma vez.</p></div>
       <a class="botao-grande" href="#/admin-avisos">+ Enviar aviso</a>
     </div>
     <div class="numeros">
@@ -833,17 +851,35 @@ async function telaAdmin() {
 // ---------- perfil ----------
 
 const REDES = [
+  { chave: 'whatsapp', nome: 'WhatsApp', exemplo: '(16) 99999-8888' },
   { chave: 'instagram', nome: 'Instagram', exemplo: 'instagram.com/seuperfil' },
   { chave: 'facebook', nome: 'Facebook', exemplo: 'facebook.com/seuperfil' },
   { chave: 'linkedin', nome: 'LinkedIn', exemplo: 'linkedin.com/in/seuperfil' },
-  { chave: 'youtube', nome: 'YouTube', exemplo: 'youtube.com/@seucanal' },
   { chave: 'site', nome: 'Site', exemplo: 'www.seusite.com.br' },
 ];
+
+// 5516999998888 -> (16) 99999-8888
+function formatarWhatsapp(n) {
+  const d = String(n || '').replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '');
+  if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return d;
+}
+
+function mascaraWhatsapp(v) {
+  const d = String(v).replace(/\D/g, '').slice(0, 11);
+  if (d.length <= 2) return d.length ? `(${d}` : '';
+  if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+  if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+}
 
 function linksRedes(redes) {
   const itens = REDES.filter((r) => redes?.[r.chave]);
   if (!itens.length) return '';
-  return `<div class="redes">${itens.map((r) => `<a class="botao secundario" href="${esc(redes[r.chave])}" target="_blank" rel="noopener nofollow">${r.nome}</a>`).join('')}</div>`;
+  return `<div class="redes">${itens.map((r) => r.chave === 'whatsapp'
+    ? `<a class="botao whatsapp" href="https://wa.me/${esc(String(redes.whatsapp).replace(/\D/g, ''))}" target="_blank" rel="noopener nofollow">WhatsApp ${esc(formatarWhatsapp(redes.whatsapp))}</a>`
+    : `<a class="botao secundario" href="${esc(redes[r.chave])}" target="_blank" rel="noopener nofollow">${r.nome}</a>`).join('')}</div>`;
 }
 
 async function telaPerfil() {
@@ -868,10 +904,13 @@ async function telaPerfil() {
       <label>Perfil</label>
       <p class="meta" style="margin:0">${u.tipo === 'especialista' ? 'Especialista' : 'Instrutor'} · CPF ${esc(mascaraCpf(u.cpf))}</p>
       <h2>Redes sociais <span class="ajuda">(opcional)</span></h2>
-      <p class="ajuda">Cole o link do seu perfil. Deixe em branco o que não usa.</p>
+      <p class="ajuda">No WhatsApp, digite só o número com DDD. Nas redes, cole o link do seu perfil. Deixe em branco o que não usa.</p>
       <div class="grade">
-        ${REDES.map((r) => `<div><label for="r_${r.chave}">${r.nome}</label>
-          <input id="r_${r.chave}" name="${r.chave}" type="text" inputmode="url" maxlength="300" placeholder="${r.exemplo}" value="${esc(redes[r.chave] || '')}"></div>`).join('')}
+        ${REDES.map((r) => r.chave === 'whatsapp'
+          ? `<div><label for="r_whatsapp">WhatsApp</label>
+            <input id="r_whatsapp" name="whatsapp" type="tel" inputmode="numeric" maxlength="16" placeholder="${r.exemplo}" value="${esc(redes.whatsapp ? formatarWhatsapp(redes.whatsapp) : '')}"></div>`
+          : `<div><label for="r_${r.chave}">${r.nome}</label>
+            <input id="r_${r.chave}" name="${r.chave}" type="text" inputmode="url" maxlength="300" placeholder="${r.exemplo}" value="${esc(redes[r.chave] || '')}"></div>`).join('')}
       </div>
       <div class="erro" id="erro"></div>
       <div class="linha-botoes">
@@ -880,6 +919,7 @@ async function telaPerfil() {
       </div>
     </form>`;
   const f = document.getElementById('f');
+  f.whatsapp.oninput = () => (f.whatsapp.value = mascaraWhatsapp(f.whatsapp.value));
   f.foto.onchange = () => {
     const arq = f.foto.files[0];
     if (arq) document.getElementById('previa').style.backgroundImage = `url(${URL.createObjectURL(arq)})`;
@@ -938,7 +978,7 @@ async function telaVerPerfil(id) {
         <p class="linha-botoes">
           ${meu ? '<a class="botao" href="#/perfil">Editar meu perfil</a>' : ''}
           ${!meu && leitor.usuario ? `<a class="botao" href="#/mensagens/${perfil.id}">Enviar mensagem</a>` : ''}
-          ${leitor.admin ? `<a class="botao secundario" href="#/admin/usuario/${perfil.id}">Ver envios (admin)</a>` : ''}
+          ${leitor.admin ? `<a class="botao secundario" href="#/admin/usuario/${perfil.id}">Ver envios (gestor)</a>` : ''}
         </p>
       </div>
     </div>
@@ -1126,7 +1166,7 @@ async function telaMaterial() {
   const { materiais, admin } = dados;
   app.innerHTML = `
     <h1>Material</h1>
-    <p class="sub">Cartilhas, arquivos do Google Drive e outros materiais de apoio. ${admin ? 'Só você (admin) pode adicionar ou apagar.' : 'Clique em <strong>Abrir</strong> para ver o material.'}</p>
+    <p class="sub">Cartilhas, arquivos do Google Drive e outros materiais de apoio. ${admin ? 'Só você (gestor) pode adicionar ou apagar.' : 'Clique em <strong>Abrir</strong> para ver o material.'}</p>
     ${admin ? `
       <details class="cartao novo-topico" ${materiais.length ? '' : 'open'}>
         <summary>+ Adicionar material</summary>
@@ -1235,7 +1275,7 @@ async function telaPerguntas() {
         ${admin ? `<button class="link perigo" data-apagar-pergunta="${p.id}">apagar</button>` : ''}
       </div>
       <div class="mensagem"><strong>Pergunta:</strong> ${esc(p.texto)}</div>
-      ${p.resposta ? `<div class="feedback" style="margin:12px 0 0"><strong>Resposta do admin (${esc(formatarData(p.respondida_em))}):</strong>\n${esc(p.resposta)}</div>` : ''}
+      ${p.resposta ? `<div class="feedback" style="margin:12px 0 0"><strong>Resposta do gestor (${esc(formatarData(p.respondida_em))}):</strong>\n${esc(p.resposta)}</div>` : ''}
       ${admin ? `
         <form class="responder" data-id="${p.id}">
           <label style="margin-top:12px">${p.resposta ? 'Alterar resposta' : 'Sua resposta'}</label>
@@ -1248,8 +1288,8 @@ async function telaPerguntas() {
     <h1>Perguntas</h1>
     <p class="sub">${pendentes ? `${pendentes} pergunta${pendentes === 1 ? '' : 's'} aguardando resposta.` : 'Nenhuma pergunta aguardando resposta.'} A resposta aparece só para quem perguntou.</p>
     ${perguntas.map(cartao).join('') || '<div class="vazio">Ninguém fez perguntas ainda.</div>'}` : `
-    <h1>Perguntas ao admin</h1>
-    <p class="sub">Tem alguma dúvida? Escreva aqui. Só você e o admin veem a pergunta e a resposta.</p>
+    <h1>Perguntas ao gestor</h1>
+    <p class="sub">Tem alguma dúvida? Escreva aqui. Só você e o gestor veem a pergunta e a resposta.</p>
     <form id="f" class="cartao">
       <label for="texto" style="margin-top:0">Sua pergunta</label>
       <textarea id="texto" name="texto" maxlength="${MAX}" placeholder="Escreva sua dúvida" required></textarea>

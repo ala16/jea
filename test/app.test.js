@@ -258,6 +258,11 @@ test('perfil: editar nome, foto e redes; outros veem', async () => {
   r = await a('/api/perfil', { json: { nome: 'Eva Perfil Souza', removerFoto: true } });
   assert.equal(r.body.usuario.foto, null);
   assert.equal(r.body.usuario.tipo, 'instrutor');
+
+  // WhatsApp: só números, com 55; número curto é recusado
+  assert.equal((await a('/api/perfil', { json: { nome: 'Eva Perfil Souza', redes: { whatsapp: '9999' } } })).status, 400);
+  r = await a('/api/perfil', { json: { nome: 'Eva Perfil Souza', redes: { whatsapp: '(16) 99999-8888', youtube: 'youtube.com/x' } } });
+  assert.deepEqual(r.body.usuario.redes, { whatsapp: '5516999998888' });
 });
 
 test('material e perguntas ao admin', async () => {
