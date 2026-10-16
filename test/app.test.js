@@ -259,3 +259,41 @@ test('perfil: editar nome, foto e redes; outros veem', async () => {
   assert.equal(r.body.usuario.foto, null);
   assert.equal(r.body.usuario.tipo, 'instrutor');
 });
+
+test('material e perguntas ao admin', async () => {
+  const esp = cliente();
+  await esp('/api/entrar', { json: { cpf: '390.533.447-05' } });
+  const ins = cliente();
+  await ins('/api/entrar', { json: { cpf: '168.995.350-09' } });
+  const adm = cliente();
+  await adm('/api/admin/entrar', { json: { senha: 'segredo' } });
+
+  // Material: só o admin publica; todos veem as três categorias
+  assert.equal((await esp('/api/admin/materiais', { json: { titulo: 'x', url: 'drive.google.com/x' } })).status, 401);
+  assert.equal((await adm('/api/admin/materiais', { json: { titulo: 'x', url: 'javascript:alert(1)' } })).status, 400);
+  let r = await adm('/api/admin/materiais', {
+    json: { titulo: 'Cartilha do especialista', categoria: 'especialista', url: 'drive.google.com/file/d/abc' },
+  });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.material.url, 'https://drive.google.com/file/d/abc');
+  await adm('/api/admin/materiais', { json: { titulo: 'Guia do instrutor', categoria: 'instrutor', url: 'https://drive.google.com/y' } });
+  r = await ins('/api/materiais');
+  assert.deepEqual(r.body.materiais.map((m) => m.categoria).sort(), ['especialista', 'instrutor']);
+  assert.equal((await esp('/api/materiais')).body.materiais.length, 2);
+  assert.equal((await cliente()('/api/materiais')).status, 401);
+  assert.equal((await adm(`/api/admin/materiais/${r.body.materiais[0].id}`, { method: 'DELETE' })).status, 200);
+
+  // Perguntas: cada um vê só as suas; o admin responde
+  assert.equal((await esp('/api/perguntas', { json: { texto: '  ' } })).status, 400);
+  r = await esp('/api/perguntas', { json: { texto: 'Qual o prazo do módulo 2?' } });
+  const pid = r.body.pergunta.id;
+  await ins('/api/perguntas', { json: { texto: 'Posso mudar o horário?' } });
+  assert.equal((await esp('/api/perguntas')).body.perguntas.length, 1);
+  assert.equal((await adm('/api/perguntas')).body.perguntas.length, 2);
+  assert.equal((await ins(`/api/admin/perguntas/${pid}/resposta`, { json: { resposta: 'x' } })).status, 401);
+  assert.equal((await adm(`/api/admin/perguntas/${pid}/resposta`, { json: { resposta: 'Até sexta.' } })).status, 200);
+  r = await esp('/api/perguntas');
+  assert.equal(r.body.perguntas[0].resposta, 'Até sexta.');
+  assert.equal((await adm(`/api/admin/perguntas/${pid}`, { method: 'DELETE' })).status, 200);
+  assert.equal((await esp('/api/perguntas')).body.perguntas.length, 0);
+});

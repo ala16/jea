@@ -76,6 +76,27 @@ const SCHEMA = `
 
   -- Links de redes sociais do perfil: { instagram, facebook, linkedin, youtube, site }.
   ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS redes JSONB;
+
+  -- Materiais (links do Google Drive, cartilhas...). Só o admin publica; todos veem.
+  CREATE TABLE IF NOT EXISTS materiais (
+    id SERIAL PRIMARY KEY,
+    categoria TEXT NOT NULL CHECK (categoria IN ('geral', 'especialista', 'instrutor')),
+    titulo TEXT NOT NULL,
+    descricao TEXT,
+    url TEXT NOT NULL,
+    criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+
+  -- Perguntas para o admin: cada pessoa vê as suas; o admin vê todas e responde.
+  CREATE TABLE IF NOT EXISTS perguntas (
+    id SERIAL PRIMARY KEY,
+    usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    texto TEXT NOT NULL,
+    resposta TEXT,
+    respondida_em TIMESTAMPTZ,
+    criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS perguntas_usuario_idx ON perguntas (usuario_id);
 `;
 
 let pronto;
@@ -272,6 +293,39 @@ module.exports = {
 
   async excluirAviso(id) {
     return (await q('DELETE FROM avisos WHERE id = $1', [id])).rowCount;
+  },
+
+  materiais: () => todos('SELECT * FROM materiais ORDER BY id DESC'),
+
+  criarMaterial: ({ categoria, titulo, descricao, url }) =>
+    um('INSERT INTO materiais (categoria, titulo, descricao, url) VALUES ($1, $2, $3, $4) RETURNING *', [
+      categoria,
+      titulo,
+      descricao,
+      url,
+    ]),
+
+  async excluirMaterial(id) {
+    return (await q('DELETE FROM materiais WHERE id = $1', [id])).rowCount;
+  },
+
+  perguntas: (usuarioId) =>
+    todos(
+      `SELECT p.*, u.nome, u.tipo, u.foto FROM perguntas p JOIN usuarios u ON u.id = p.usuario_id
+        ${usuarioId ? 'WHERE p.usuario_id = $1' : ''}
+        ORDER BY (p.resposta IS NULL) DESC, p.id DESC`,
+      usuarioId ? [usuarioId] : []
+    ),
+
+  criarPergunta: (usuarioId, texto) =>
+    um('INSERT INTO perguntas (usuario_id, texto) VALUES ($1, $2) RETURNING *', [usuarioId, texto]),
+
+  async responderPergunta(id, resposta) {
+    return (await q('UPDATE perguntas SET resposta = $2, respondida_em = now() WHERE id = $1', [id, resposta])).rowCount;
+  },
+
+  async excluirPergunta(id) {
+    return (await q('DELETE FROM perguntas WHERE id = $1', [id])).rowCount;
   },
 
   async darFeedback(ids, feedback) {
