@@ -62,6 +62,8 @@ const SCHEMA = `
     criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
   );
   CREATE INDEX IF NOT EXISTS forum_respostas_topico_idx ON forum_respostas (topico_id, criado_em);
+  ALTER TABLE forum_topicos ADD COLUMN IF NOT EXISTS imagem TEXT;
+  ALTER TABLE forum_respostas ADD COLUMN IF NOT EXISTS imagem TEXT;
 `;
 
 let pronto;
@@ -198,26 +200,46 @@ module.exports = {
       [topicoId]
     ),
 
-  criarTopico: ({ forum, usuarioId, titulo, texto }) =>
-    um('INSERT INTO forum_topicos (forum, usuario_id, titulo, texto) VALUES ($1, $2, $3, $4) RETURNING id', [
-      forum,
-      usuarioId,
-      titulo,
-      texto,
-    ]),
+  criarTopico: ({ forum, usuarioId, titulo, texto, imagem }) =>
+    um(
+      'INSERT INTO forum_topicos (forum, usuario_id, titulo, texto, imagem) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [forum, usuarioId, titulo, texto, imagem]
+    ),
 
-  responder: ({ topicoId, usuarioId, texto }) =>
-    um('INSERT INTO forum_respostas (topico_id, usuario_id, texto) VALUES ($1, $2, $3) RETURNING id', [
+  responder: ({ topicoId, usuarioId, texto, imagem }) =>
+    um('INSERT INTO forum_respostas (topico_id, usuario_id, texto, imagem) VALUES ($1, $2, $3, $4) RETURNING id', [
       topicoId,
       usuarioId,
       texto,
+      imagem,
     ]),
+
+  // Imagens do fórum podem ser vistas por qualquer pessoa logada.
+  async imagemDoForum(url) {
+    const r = await um(
+      'SELECT 1 FROM forum_topicos WHERE imagem = $1 UNION SELECT 1 FROM forum_respostas WHERE imagem = $1',
+      [url]
+    );
+    return Boolean(r);
+  },
 
   resposta: (id) => um('SELECT * FROM forum_respostas WHERE id = $1', [id]),
 
-  excluirTopico: (id) => q('DELETE FROM forum_topicos WHERE id = $1', [id]),
+  // Apagam e devolvem as imagens que ficaram sem uso, para remover os arquivos.
+  async excluirTopico(id) {
+    const imgs = await todos(
+      `SELECT imagem FROM forum_topicos WHERE id = $1 AND imagem IS NOT NULL
+       UNION ALL SELECT imagem FROM forum_respostas WHERE topico_id = $1 AND imagem IS NOT NULL`,
+      [id]
+    );
+    await q('DELETE FROM forum_topicos WHERE id = $1', [id]);
+    return imgs.map((r) => r.imagem);
+  },
 
-  excluirResposta: (id) => q('DELETE FROM forum_respostas WHERE id = $1', [id]),
+  async excluirResposta(id) {
+    const r = await um('DELETE FROM forum_respostas WHERE id = $1 RETURNING imagem', [id]);
+    return r?.imagem ? [r.imagem] : [];
+  },
 
   async darFeedback(ids, feedback) {
     const r = await q('UPDATE modulos SET feedback = $1, feedback_em = now() WHERE id = ANY($2::int[])', [feedback, ids]);

@@ -115,3 +115,5 @@ th { background: #eef2ef; font-weight: 600; }
 .link.perigo { color: var(--erro); margin-left: 8px; font-weight: 400; font-size: 13px; }
 #topo-usuario { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex: 1; }
 @media (max-width: 600px) { .menu { margin-left: 0; } .topo .usuario span { display: none; } }
+.imagem-forum { display: inline-block; margin-top: 12px; }
+.imagem-forum img { display: block; max-width: 100%; max-height: 420px; border-radius: 8px; border: 1px solid var(--borda); }
