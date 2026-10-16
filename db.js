@@ -204,13 +204,17 @@ module.exports = {
          FROM usuarios u ORDER BY u.nome`
     ),
 
-  todosEnvios: () =>
+  todosEnvios: (usuarioId) =>
     todos(
       `SELECT m.*, t.cidade, t.sindicato, t.periodo AS horario,
               u.id AS usuario_id, u.nome, u.cpf, u.tipo
          FROM modulos m JOIN turmas t ON t.id = m.turma_id JOIN usuarios u ON u.id = t.usuario_id
-        ORDER BY m.atualizado_em DESC`
+        ${usuarioId ? 'WHERE u.id = $1' : ''}
+        ORDER BY m.atualizado_em DESC`,
+      usuarioId ? [usuarioId] : []
     ),
+
+  usuarioPorId: (id) => um('SELECT * FROM usuarios WHERE id = $1', [id]),
 
   topicos: (forum) =>
     todos(

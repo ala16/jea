@@ -297,3 +297,25 @@ test('material e perguntas ao admin', async () => {
   assert.equal((await adm(`/api/admin/perguntas/${pid}`, { method: 'DELETE' })).status, 200);
   assert.equal((await esp('/api/perguntas')).body.perguntas.length, 0);
 });
+
+test('admin: ficha da pessoa com turmas e envios', async () => {
+  const a = cliente();
+  await a('/api/entrar', { json: { cpf: '458.537.100-10' } });
+  await a('/api/cadastro', { json: { nome: 'Fabio Ficha', tipo: 'instrutor' } });
+  const { turma } = (await a('/api/turmas', { json: { cidade: 'Franca', sindicato: 'SR Franca', horario: '08:00 às 12:00' } })).body;
+  await a(`/api/turmas/${turma.id}/modulos/2`, { json: { texto: 'aula 2' } });
+  const id = (await a('/api/eu')).body.usuario.id;
+
+  assert.equal((await a(`/api/admin/usuarios/${id}`)).status, 401);
+  const adm = cliente();
+  await adm('/api/admin/entrar', { json: { senha: 'segredo' } });
+  let r = await adm(`/api/admin/usuarios/${id}`);
+  assert.equal(r.body.usuario.nome, 'Fabio Ficha');
+  assert.equal(r.body.turmas.length, 1);
+  assert.equal(r.body.envios.length, 1);
+  assert.equal(r.body.envios[0].texto, 'aula 2');
+  assert.equal((await adm('/api/admin/usuarios/999999')).status, 404);
+  await adm('/api/admin/feedback', { json: { ids: [r.body.envios[0].id], feedback: 'Ótimo' } });
+  r = await a(`/api/turmas/${turma.id}`);
+  assert.equal(r.body.modulos[0].feedback, 'Ótimo');
+});
