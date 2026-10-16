@@ -41,21 +41,21 @@ ADMIN_PASSWORD=sua-senha npm start
 
 ## Funcionalidades
 
-- **Entrada por CPF** (com validação dos dígitos). No primeiro acesso a pessoa informa nome completo, foto opcional e se é especialista ou instrutor.
+- **Entrada por CPF** (com validação dos dígitos). No primeiro acesso a pessoa informa nome completo, e-mail e se é especialista ou instrutor (obrigatórios); foto, WhatsApp e redes sociais são opcionais e podem ser preenchidos depois no perfil.
 - **Painel**: cadastra quantas turmas quiser (cidade, sindicato rural e horário).
 - **8 módulos por turma**:
   - Especialista, módulo 1: Planejamento (título, missão, objetivo, metas, valores, visão, cronograma, orçamento) e Expedição do Agro (local, data, objetivo, resultado, foto).
   - Especialista, módulos 2 a 8: texto e anexo.
   - Instrutor, módulos 1 a 8: texto e imagem.
   - Textos com limite de 2000 caracteres e arquivos de até 5MB.
-- **Perfil**: clicando na foto ou no nome no topo, a pessoa edita nome, foto e links das redes sociais (WhatsApp, Instagram, Facebook, LinkedIn, site). No fórum, o nome do autor abre o perfil dele.
+- **Perfil**: clicando na foto ou no nome no topo, a pessoa edita nome, e-mail, foto e links das redes sociais (WhatsApp, Instagram, Facebook, LinkedIn, site). No fórum, o nome do autor abre o perfil dele.
 - **Participantes**: lista de especialistas e instrutores (filtro por perfil e busca). O perfil mostra as turmas, o progresso e as postagens no fórum, mas não o conteúdo dos módulos.
 - **Mensagens**: conversas diretas entre participantes, com contador de não lidas no menu.
 - **Fórum** com três áreas: Geral, Especialistas e Instrutores. Todos os cadastrados leem, publicam e respondem nas três. O autor pode apagar o que escreveu, e o admin pode apagar qualquer mensagem.
 - **Avisos**: o admin escreve avisos para todos, só especialistas ou só instrutores. Eles aparecem no painel de quem entra e no menu Avisos, com a contagem dos não lidos.
 - **Material**: o admin publica links (Google Drive, cartilhas, vídeos) nas categorias Geral, Especialista e Instrutor. Todos os cadastrados veem as três.
 - **Perguntas**: cada pessoa envia dúvidas ao admin e vê só as suas; o admin vê todas, responde e o menu mostra quantas aguardam resposta.
-- **Admin** (link "Acesso do gestor" na tela inicial): uma linha por envio, cada um com a sua caixa de feedback ao lado. A tabela de cadastrados mostra quantos envios cada pessoa fez. Clicar no nome abre a ficha da pessoa, com perfil, turmas e todos os envios, cada um com a sua caixa de feedback. O painel lista todos os envios com filtros por perfil, módulo, feedback e busca; seleciona vários e envia o mesmo feedback para todos. O feedback aparece para o usuário no módulo.
+- **Admin** (link "Acesso do gestor" na tela inicial): uma linha por envio, cada um com a sua caixa de feedback ao lado. A tabela de cadastrados mostra quantos envios cada pessoa fez. Clicar no nome abre a ficha da pessoa, com perfil, turmas e todos os envios, cada um com a sua caixa de feedback. O e-mail aparece só para o gestor, na tabela de cadastrados e na ficha. O feedback aparece para o usuário no módulo.
 
 ## Testes
 

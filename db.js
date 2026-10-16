@@ -76,6 +76,8 @@ const SCHEMA = `
 
   -- Links de redes sociais do perfil: { instagram, facebook, linkedin, youtube, site }.
   ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS redes JSONB;
+  -- E-mail de contato (obrigatório nos cadastros novos; só o gestor vê).
+  ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS email TEXT;
 
   -- Materiais (links do Google Drive, cartilhas...). Só o admin publica; todos veem.
   CREATE TABLE IF NOT EXISTS materiais (
@@ -149,11 +151,16 @@ const todos = async (sql, params) => (await q(sql, params)).rows;
 module.exports = {
   usuarioPorCpf: (cpf) => um('SELECT * FROM usuarios WHERE cpf = $1', [cpf]),
 
-  criarUsuario: ({ cpf, nome, tipo, foto }) =>
-    um('INSERT INTO usuarios (cpf, nome, tipo, foto) VALUES ($1, $2, $3, $4) RETURNING *', [cpf, nome, tipo, foto]),
+  criarUsuario: ({ cpf, nome, email, tipo, foto, redes }) =>
+    um(
+      'INSERT INTO usuarios (cpf, nome, email, tipo, foto, redes) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+      [cpf, nome, email, tipo, foto, JSON.stringify(redes || {})]
+    ),
 
-  atualizarPerfil: (id, { nome, foto, redes }) =>
-    um('UPDATE usuarios SET nome = $2, foto = $3, redes = $4 WHERE id = $1 RETURNING *', [id, nome, foto, JSON.stringify(redes)]),
+  atualizarPerfil: (id, { nome, email, foto, redes }) =>
+    um('UPDATE usuarios SET nome = $2, email = $3, foto = $4, redes = $5 WHERE id = $1 RETURNING *', [
+      id, nome, email, foto, JSON.stringify(redes),
+    ]),
 
   perfil: (id) => um('SELECT id, nome, tipo, foto, redes FROM usuarios WHERE id = $1', [id]),
 

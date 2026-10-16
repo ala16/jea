@@ -173,18 +173,6 @@ app.get('/api/eu', exigirCpf, (req, res) => {
   res.json({ cpf: req.cpf, usuario: req.usuario });
 });
 
-// Primeiro acesso: nome, foto opcional, tipo
-app.post('/api/cadastro', exigirCpf, async (req, res) => {
-  if (req.usuario) return res.status(400).json({ erro: 'Cadastro já realizado.' });
-  const nome = texto(req.body.nome, 200).trim();
-  const tipo = req.body.tipo;
-  if (nome.split(/\s+/).length < 2) return res.status(400).json({ erro: 'Informe seu nome completo.' });
-  if (!['especialista', 'instrutor'].includes(tipo)) return res.status(400).json({ erro: 'Escolha especialista ou instrutor.' });
-  const foto = lerArquivo(req.body.foto, { imagem: true });
-  const usuario = await db.criarUsuario({ cpf: req.cpf, nome, tipo, foto: foto?.url || null });
-  res.json({ usuario });
-});
-
 // Perfil: a pessoa edita nome, foto e redes sociais. O perfil (tipo) não muda.
 const REDES = ['instagram', 'facebook', 'linkedin', 'site'];
 
@@ -197,6 +185,34 @@ function lerWhatsapp(v) {
     throw Object.assign(new Error('WhatsApp inválido. Digite o DDD e o número, ex.: (16) 99999-8888.'), { status: 400 });
   }
   return n;
+}
+
+function erro400(msg) {
+  return Object.assign(new Error(msg), { status: 400 });
+}
+
+function lerNome(v) {
+  const nome = texto(v, 200).trim().replace(/\s+/g, ' ');
+  if (nome.split(' ').length < 2) throw erro400('Informe seu nome completo.');
+  return nome;
+}
+
+function lerEmail(v) {
+  const email = texto(v, 200).trim().toLowerCase();
+  if (!email) throw erro400('Informe seu e-mail.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw erro400('E-mail inválido.');
+  return email;
+}
+
+function lerRedes(v) {
+  const redes = {};
+  const whatsapp = lerWhatsapp(v?.whatsapp);
+  if (whatsapp) redes.whatsapp = whatsapp;
+  for (const r of REDES) {
+    const link = lerLink(v?.[r]);
+    if (link) redes[r] = link;
+  }
+  return redes;
 }
 
 function lerLink(v) {
@@ -212,20 +228,27 @@ function lerLink(v) {
   }
 }
 
+// Primeiro acesso: nome, e-mail e tipo são obrigatórios; foto e redes, opcionais.
+app.post('/api/cadastro', exigirCpf, async (req, res) => {
+  if (req.usuario) return res.status(400).json({ erro: 'Cadastro já realizado.' });
+  const nome = lerNome(req.body.nome);
+  const email = lerEmail(req.body.email);
+  const tipo = req.body.tipo;
+  if (!['especialista', 'instrutor'].includes(tipo)) return res.status(400).json({ erro: 'Escolha especialista ou instrutor.' });
+  const redes = lerRedes(req.body.redes);
+  const foto = lerArquivo(req.body.foto, { imagem: true });
+  const usuario = await db.criarUsuario({ cpf: req.cpf, nome, email, tipo, foto: foto?.url || null, redes });
+  res.json({ usuario });
+});
+
 app.post('/api/perfil', exigirUsuario, async (req, res) => {
-  const nome = texto(req.body.nome, 200).trim();
-  if (nome.split(/\s+/).length < 2) return res.status(400).json({ erro: 'Informe seu nome completo.' });
-  const redes = {};
-  const whatsapp = lerWhatsapp(req.body.redes?.whatsapp);
-  if (whatsapp) redes.whatsapp = whatsapp;
-  for (const r of REDES) {
-    const link = lerLink(req.body.redes?.[r]);
-    if (link) redes[r] = link;
-  }
+  const nome = lerNome(req.body.nome);
+  const email = lerEmail(req.body.email);
+  const redes = lerRedes(req.body.redes);
   const nova = lerArquivo(req.body.foto, { imagem: true });
   const antiga = req.usuario.foto;
   const foto = nova ? nova.url : req.body.removerFoto ? null : antiga;
-  const usuario = await db.atualizarPerfil(req.usuario.id, { nome, foto, redes });
+  const usuario = await db.atualizarPerfil(req.usuario.id, { nome, email, foto, redes });
   if (antiga && antiga !== foto) await arquivos.remover(antiga);
   res.json({ usuario });
 });

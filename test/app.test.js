@@ -70,9 +70,16 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
   assert.equal((await a('/api/turmas')).status, 403);
 
   const foto = await subir(a, 'fakepng', 'image/png', 'eu.png');
-  r = await a('/api/cadastro', { json: { nome: 'Maria da Silva', tipo: 'especialista', foto } });
+  // E-mail é obrigatório e precisa ser válido; WhatsApp e redes são opcionais.
+  assert.equal((await a('/api/cadastro', { json: { nome: 'Maria da Silva', tipo: 'especialista' } })).status, 400);
+  assert.equal((await a('/api/cadastro', { json: { email: 'maria@', nome: 'Maria da Silva', tipo: 'especialista' } })).status, 400);
+  r = await a('/api/cadastro', {
+    json: { email: ' Maria@Exemplo.com ', nome: 'Maria da Silva', tipo: 'especialista', foto, redes: { whatsapp: '(16) 99999-8888' } },
+  });
   assert.equal(r.status, 200);
   assert.equal(r.body.usuario.tipo, 'especialista');
+  assert.equal(r.body.usuario.email, 'maria@exemplo.com');
+  assert.equal(r.body.usuario.redes.whatsapp, '5516999998888');
   assert.equal((await a(foto.url)).status, 200);
 
   r = await a('/api/entrar', { json: { cpf: CPF_A } });
@@ -107,7 +114,7 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
   // Instrutor: só imagem
   const b = cliente();
   await b('/api/entrar', { json: { cpf: CPF_B } });
-  await b('/api/cadastro', { json: { nome: 'João Souza', tipo: 'instrutor' } });
+  await b('/api/cadastro', { json: { email: 'teste@exemplo.com', nome: 'João Souza', tipo: 'instrutor' } });
   r = await b('/api/turmas', { json: { cidade: 'Rio Verde', sindicato: 'SR Rio Verde', horario: 'noite' } });
   const turmaB = r.body.turma.id;
   const pdfB = await subir(b, '%PDF', 'application/pdf', 'doc.pdf');
@@ -150,10 +157,10 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
 test('fórum: todos leem e publicam nos três fóruns', async () => {
   const esp = cliente();
   await esp('/api/entrar', { json: { cpf: '390.533.447-05' } });
-  await esp('/api/cadastro', { json: { nome: 'Ana Especialista', tipo: 'especialista' } });
+  await esp('/api/cadastro', { json: { email: 'teste@exemplo.com', nome: 'Ana Especialista', tipo: 'especialista' } });
   const ins = cliente();
   await ins('/api/entrar', { json: { cpf: '168.995.350-09' } });
-  await ins('/api/cadastro', { json: { nome: 'Beto Instrutor', tipo: 'instrutor' } });
+  await ins('/api/cadastro', { json: { email: 'teste@exemplo.com', nome: 'Beto Instrutor', tipo: 'instrutor' } });
 
   assert.equal((await cliente()('/api/forum/geral')).status, 401);
 
@@ -205,10 +212,10 @@ test('fórum: todos leem e publicam nos três fóruns', async () => {
 test('avisos: admin publica, cada perfil vê os seus', async () => {
   const esp = cliente();
   await esp('/api/entrar', { json: { cpf: '714.602.380-01' } });
-  await esp('/api/cadastro', { json: { nome: 'Carla Especialista', tipo: 'especialista' } });
+  await esp('/api/cadastro', { json: { email: 'teste@exemplo.com', nome: 'Carla Especialista', tipo: 'especialista' } });
   const ins = cliente();
   await ins('/api/entrar', { json: { cpf: '935.411.347-80' } });
-  await ins('/api/cadastro', { json: { nome: 'Davi Instrutor', tipo: 'instrutor' } });
+  await ins('/api/cadastro', { json: { email: 'teste@exemplo.com', nome: 'Davi Instrutor', tipo: 'instrutor' } });
   const adm = cliente();
   await adm('/api/admin/entrar', { json: { senha: 'segredo' } });
 
@@ -232,13 +239,13 @@ test('avisos: admin publica, cada perfil vê os seus', async () => {
 test('perfil: editar nome, foto e redes; outros veem', async () => {
   const a = cliente();
   await a('/api/entrar', { json: { cpf: '286.255.878-87' } });
-  await a('/api/cadastro', { json: { nome: 'Eva Perfil', tipo: 'instrutor' } });
+  await a('/api/cadastro', { json: { email: 'teste@exemplo.com', nome: 'Eva Perfil', tipo: 'instrutor' } });
   const foto = await subir(a, 'img', 'image/png', 'eu.png');
   let r = await a('/api/perfil', {
-    json: { nome: 'Eva Perfil Souza', foto, redes: { instagram: 'instagram.com/eva', site: '', linkedin: 'javascript:alert(1)' } },
+    json: { email: 'teste@exemplo.com', nome: 'Eva Perfil Souza', foto, redes: { instagram: 'instagram.com/eva', site: '', linkedin: 'javascript:alert(1)' } },
   });
   assert.equal(r.status, 400);
-  r = await a('/api/perfil', { json: { nome: 'Eva Perfil Souza', foto, redes: { instagram: 'instagram.com/eva', facebook: 'https://facebook.com/eva' } } });
+  r = await a('/api/perfil', { json: { email: 'teste@exemplo.com', nome: 'Eva Perfil Souza', foto, redes: { instagram: 'instagram.com/eva', facebook: 'https://facebook.com/eva' } } });
   assert.equal(r.status, 200);
   assert.equal(r.body.usuario.nome, 'Eva Perfil Souza');
   assert.deepEqual(r.body.usuario.redes, { instagram: 'https://instagram.com/eva', facebook: 'https://facebook.com/eva' });
@@ -246,7 +253,9 @@ test('perfil: editar nome, foto e redes; outros veem', async () => {
 
   const b = cliente();
   await b('/api/entrar', { json: { cpf: '529.982.247-25' } });
+  assert.equal((await a('/api/perfil', { json: { nome: 'Eva Perfil Souza' } })).status, 400);
   r = await b(`/api/perfil/${id}`);
+  assert.equal(r.body.perfil.email, undefined);
   assert.equal(r.status, 200);
   assert.equal(r.body.perfil.redes.instagram, 'https://instagram.com/eva');
   assert.equal(r.body.perfil.cpf, undefined);
@@ -255,16 +264,16 @@ test('perfil: editar nome, foto e redes; outros veem', async () => {
 
   // Trocar a foto apaga a antiga; remover deixa sem foto
   const nova = await subir(a, 'img2', 'image/png', 'nova.png');
-  r = await a('/api/perfil', { json: { nome: 'Eva Perfil Souza', foto: nova } });
+  r = await a('/api/perfil', { json: { email: 'teste@exemplo.com', nome: 'Eva Perfil Souza', foto: nova } });
   assert.equal(r.body.usuario.foto, nova.url);
   assert.equal((await a(foto.url)).status, 404);
-  r = await a('/api/perfil', { json: { nome: 'Eva Perfil Souza', removerFoto: true } });
+  r = await a('/api/perfil', { json: { email: 'teste@exemplo.com', nome: 'Eva Perfil Souza', removerFoto: true } });
   assert.equal(r.body.usuario.foto, null);
   assert.equal(r.body.usuario.tipo, 'instrutor');
 
   // WhatsApp: só números, com 55; número curto é recusado
-  assert.equal((await a('/api/perfil', { json: { nome: 'Eva Perfil Souza', redes: { whatsapp: '9999' } } })).status, 400);
-  r = await a('/api/perfil', { json: { nome: 'Eva Perfil Souza', redes: { whatsapp: '(16) 99999-8888', youtube: 'youtube.com/x' } } });
+  assert.equal((await a('/api/perfil', { json: { email: 'teste@exemplo.com', nome: 'Eva Perfil Souza', redes: { whatsapp: '9999' } } })).status, 400);
+  r = await a('/api/perfil', { json: { email: 'teste@exemplo.com', nome: 'Eva Perfil Souza', redes: { whatsapp: '(16) 99999-8888', youtube: 'youtube.com/x' } } });
   assert.deepEqual(r.body.usuario.redes, { whatsapp: '5516999998888' });
 });
 
@@ -309,7 +318,7 @@ test('material e perguntas ao admin', async () => {
 test('admin: ficha da pessoa com turmas e envios', async () => {
   const a = cliente();
   await a('/api/entrar', { json: { cpf: '458.537.100-10' } });
-  await a('/api/cadastro', { json: { nome: 'Fabio Ficha', tipo: 'instrutor' } });
+  await a('/api/cadastro', { json: { email: 'teste@exemplo.com', nome: 'Fabio Ficha', tipo: 'instrutor' } });
   const { turma } = (await a('/api/turmas', { json: { cidade: 'Franca', sindicato: 'SR Franca', horario: '08:00 às 12:00' } })).body;
   await a(`/api/turmas/${turma.id}/modulos/2`, { json: { texto: 'aula 2' } });
   const id = (await a('/api/eu')).body.usuario.id;

@@ -272,32 +272,61 @@ async function telaInicio() {
   };
 }
 
+const OBRIG = '<span class="obrig" aria-hidden="true">*</span>';
+const OPCIONAL = '<span class="tag-opcional">opcional</span>';
+
+// Campos de WhatsApp e redes sociais, usados no cadastro e no perfil.
+function camposRedes(redes = {}) {
+  return `<div class="grade">
+    ${REDES.map((r) => r.chave === 'whatsapp'
+      ? `<div><label for="r_whatsapp">WhatsApp ${OPCIONAL}</label>
+        <input id="r_whatsapp" name="whatsapp" type="tel" inputmode="numeric" maxlength="16" placeholder="${r.exemplo}" value="${esc(redes.whatsapp ? formatarWhatsapp(redes.whatsapp) : '')}"></div>`
+      : `<div><label for="r_${r.chave}">${r.nome} ${OPCIONAL}</label>
+        <input id="r_${r.chave}" name="${r.chave}" type="text" inputmode="url" maxlength="300" placeholder="${r.exemplo}" value="${esc(redes[r.chave] || '')}"></div>`).join('')}
+  </div>`;
+}
+
+function lerCamposRedes(f) {
+  return Object.fromEntries(REDES.map((r) => [r.chave, f[r.chave].value]));
+}
+
 async function telaCadastro() {
   const r = await carregarUsuario();
   if (!r) return ir('#/');
   if (r.usuario) return ir('#/painel');
   desenharTopo('<div class="usuario"><button data-sair>Sair</button></div>');
   app.innerHTML = `
-    <div class="centro cartao" style="max-width:520px">
+    <div class="centro cartao" style="max-width:640px">
       <p class="passo">Primeiro acesso</p>
       <h1>Complete seu cadastro</h1>
-      <p class="sub">CPF ${esc(mascaraCpf(r.cpf))}. Só precisa fazer isso uma vez.</p>
-      <form id="f">
-        <label for="nome">Nome completo</label>
+      <p class="sub">Os campos com ${OBRIG} são obrigatórios. O resto é opcional e você pode preencher depois em <strong>Meu perfil</strong>.</p>
+      <form id="f" novalidate>
+        <h2 style="margin-top:8px">Dados obrigatórios</h2>
+        <label for="nome">Nome completo ${OBRIG}</label>
         <input id="nome" name="nome" type="text" maxlength="200" autocomplete="name" required>
-        <label>Você é</label>
+        <label for="email">E-mail ${OBRIG}</label>
+        <input id="email" name="email" type="email" maxlength="200" autocomplete="email" placeholder="seunome@email.com" required>
+        <label for="cpf">CPF ${OBRIG}</label>
+        <input id="cpf" type="text" value="${esc(mascaraCpf(r.cpf))}" disabled>
+        <label>Você é ${OBRIG}</label>
         <div class="opcoes">
           <label><input type="radio" name="tipo" value="especialista" required><span><strong>Especialista</strong><small>Preenche o planejamento e a expedição do agro</small></span></label>
           <label><input type="radio" name="tipo" value="instrutor" required><span><strong>Instrutor</strong><small>Envia texto e imagem em cada módulo</small></span></label>
         </div>
-        <label for="foto">Foto do perfil <span class="ajuda">(opcional, até 5MB)</span></label>
-        <div class="foto-perfil"><span class="avatar grande" id="previa"></span><input id="foto" name="foto" type="file" accept="image/*"></div>
+        <div class="secao-form">
+          <h2>Opcional</h2>
+          <p class="ajuda">Pode deixar em branco e completar depois em Meu perfil. No WhatsApp, digite só o número com DDD; nas redes, cole o link do seu perfil.</p>
+          <label for="foto">Foto do perfil ${OPCIONAL} <span class="ajuda">(até 5MB)</span></label>
+          <div class="foto-perfil"><span class="avatar grande" id="previa"></span><input id="foto" name="foto" type="file" accept="image/*"></div>
+          ${camposRedes()}
+        </div>
         <div class="erro" id="erro"></div>
         <div class="linha-botoes"><button type="submit">Concluir cadastro</button></div>
       </form>
     </div>`;
   const f = document.getElementById('f');
   f.nome.focus();
+  f.whatsapp.oninput = () => (f.whatsapp.value = mascaraWhatsapp(f.whatsapp.value));
   f.foto.onchange = () => {
     const arq = f.foto.files[0];
     const previa = document.getElementById('previa');
@@ -305,6 +334,11 @@ async function telaCadastro() {
   };
   f.onsubmit = async (e) => {
     e.preventDefault();
+    const erro = document.getElementById('erro');
+    const falta = !f.nome.value.trim() ? 'Informe seu nome completo.'
+      : !f.email.value.trim() ? 'Informe seu e-mail.'
+      : !f.tipo.value ? 'Escolha se você é especialista ou instrutor.' : '';
+    if (falta) { erro.textContent = falta; return; }
     const botao = f.querySelector('button[type=submit]');
     botao.disabled = true;
     try {
@@ -313,13 +347,15 @@ async function telaCadastro() {
       await api('/api/cadastro', {
         json: {
           nome: f.nome.value,
+          email: f.email.value,
           tipo: f.tipo.value,
+          redes: lerCamposRedes(f),
           foto: foto ? await enviarArquivo(foto, true) : null,
         },
       });
       ir('#/painel');
     } catch (err) {
-      document.getElementById('erro').textContent = err.message;
+      erro.textContent = err.message;
       botao.disabled = false;
       botao.textContent = 'Concluir cadastro';
     }
@@ -672,7 +708,7 @@ async function telaAdminUsuario(id) {
       <div>
         <h1>${esc(u.nome)}</h1>
         <span class="tag">${u.tipo === 'especialista' ? 'Especialista' : 'Instrutor'}</span>
-        <p class="meta" style="margin:8px 0 0">CPF ${esc(mascaraCpf(u.cpf))} · cadastro em ${esc(formatarData(u.criado_em))}</p>
+        <p class="meta" style="margin:8px 0 0">CPF ${esc(mascaraCpf(u.cpf))}${u.email ? ` · <a href="mailto:${esc(u.email)}">${esc(u.email)}</a>` : ''} · cadastro em ${esc(formatarData(u.criado_em))}</p>
         <p class="meta" style="margin:0">${turmas.length} turma${turmas.length === 1 ? '' : 's'} · ${envios.length} módulo${envios.length === 1 ? '' : 's'} enviado${envios.length === 1 ? '' : 's'} · ${semFeedback} sem feedback</p>
         ${linksRedes(u.redes)}
       </div>
@@ -749,10 +785,10 @@ async function telaAdmin() {
     <h2>Cadastrados</h2>
     <p class="ajuda">Clique no nome para abrir a ficha da pessoa, com todos os envios.</p>
     <div class="tabela"><table>
-      <thead><tr><th>Nome</th><th>CPF</th><th>Perfil</th><th>Turmas</th><th>Envios</th><th>Cadastro</th></tr></thead>
-      <tbody>${usuarios.map((u) => `<tr><td><a href="#/admin/usuario/${u.id}"><strong>${esc(u.nome)}</strong></a></td><td>${esc(mascaraCpf(u.cpf))}</td><td>${nomeTipo(u.tipo)}</td><td>${u.turmas}</td>
+      <thead><tr><th>Nome</th><th>CPF</th><th>E-mail</th><th>Perfil</th><th>Turmas</th><th>Envios</th><th>Cadastro</th></tr></thead>
+      <tbody>${usuarios.map((u) => `<tr><td><a href="#/admin/usuario/${u.id}"><strong>${esc(u.nome)}</strong></a></td><td>${esc(mascaraCpf(u.cpf))}</td><td>${u.email ? `<a href="mailto:${esc(u.email)}">${esc(u.email)}</a>` : '<span class="meta">—</span>'}</td><td>${nomeTipo(u.tipo)}</td><td>${u.turmas}</td>
         <td><strong>${u.envios}</strong> de ${u.turmas * 8}${u.sem_feedback ? `<div class="meta"><span class="tag novo">${u.sem_feedback} sem feedback</span></div>` : ''}</td>
-        <td>${esc(formatarData(u.criado_em))}</td></tr>`).join('') || '<tr><td colspan="6" class="meta">Ninguém cadastrado ainda.</td></tr>'}</tbody>
+        <td>${esc(formatarData(u.criado_em))}</td></tr>`).join('') || '<tr><td colspan="7" class="meta">Ninguém cadastrado ainda.</td></tr>'}</tbody>
     </table></div>`;
 
   const corpo = document.getElementById('corpo');
@@ -839,9 +875,10 @@ async function telaPerfil() {
   app.innerHTML = `
     <p><a href="#/painel">← Minhas turmas</a></p>
     <h1>Meu perfil</h1>
-    <p class="sub">Atualize seu nome, sua foto e os links das suas redes sociais. Eles aparecem para os outros participantes no fórum.</p>
+    <p class="sub">Os campos com ${OBRIG} são obrigatórios; o resto é opcional. Seu e-mail e CPF só o gestor vê.</p>
+    ${u.email ? '' : '<p class="alerta-email">Falta o seu e-mail. Preencha abaixo e salve o perfil.</p>'}
     <form id="f" class="cartao">
-      <label style="margin-top:0">Foto do perfil <span class="ajuda">(até 5MB)</span></label>
+      <label style="margin-top:0">Foto do perfil ${OPCIONAL} <span class="ajuda">(até 5MB)</span></label>
       <div class="foto-perfil">
         <span class="avatar grande" id="previa" style="${u.foto ? `background-image:url('${esc(u.foto)}')` : ''}"></span>
         <div style="flex:1">
@@ -849,19 +886,15 @@ async function telaPerfil() {
           ${u.foto ? '<label class="remover-foto"><input type="checkbox" name="removerFoto"> remover foto atual</label>' : ''}
         </div>
       </div>
-      <label for="nome">Nome completo</label>
+      <label for="nome">Nome completo ${OBRIG}</label>
       <input id="nome" name="nome" type="text" maxlength="200" value="${esc(u.nome)}" required>
+      <label for="email">E-mail ${OBRIG}</label>
+      <input id="email" name="email" type="email" maxlength="200" autocomplete="email" placeholder="seunome@email.com" value="${esc(u.email || '')}" required>
       <label>Perfil</label>
       <p class="meta" style="margin:0">${u.tipo === 'especialista' ? 'Especialista' : 'Instrutor'} · CPF ${esc(mascaraCpf(u.cpf))}</p>
-      <h2>Redes sociais <span class="ajuda">(opcional)</span></h2>
+      <h2>Redes sociais ${OPCIONAL}</h2>
       <p class="ajuda">No WhatsApp, digite só o número com DDD. Nas redes, cole o link do seu perfil. Deixe em branco o que não usa.</p>
-      <div class="grade">
-        ${REDES.map((r) => r.chave === 'whatsapp'
-          ? `<div><label for="r_whatsapp">WhatsApp</label>
-            <input id="r_whatsapp" name="whatsapp" type="tel" inputmode="numeric" maxlength="16" placeholder="${r.exemplo}" value="${esc(redes.whatsapp ? formatarWhatsapp(redes.whatsapp) : '')}"></div>`
-          : `<div><label for="r_${r.chave}">${r.nome}</label>
-            <input id="r_${r.chave}" name="${r.chave}" type="text" inputmode="url" maxlength="300" placeholder="${r.exemplo}" value="${esc(redes[r.chave] || '')}"></div>`).join('')}
-      </div>
+      ${camposRedes(redes)}
       <div class="erro" id="erro"></div>
       <div class="linha-botoes">
         <button type="submit">Salvar perfil</button>
@@ -884,9 +917,10 @@ async function telaPerfil() {
       if (arq) botao.textContent = 'Enviando foto...';
       const corpo = {
         nome: f.nome.value,
+        email: f.email.value,
         foto: arq ? await enviarArquivo(arq, true) : null,
         removerFoto: Boolean(f.removerFoto?.checked),
-        redes: Object.fromEntries(REDES.map((r) => [r.chave, f[r.chave].value])),
+        redes: lerCamposRedes(f),
       };
       await api('/api/perfil', { json: corpo });
       avisar('Perfil salvo.');
