@@ -49,6 +49,8 @@ ADMIN_PASSWORD=sua-senha npm start
   - Instrutor, módulos 1 a 8: texto e imagem.
   - Textos com limite de 2000 caracteres e arquivos de até 5MB.
 - **Perfil**: clicando na foto ou no nome no topo, a pessoa edita nome, foto e links das redes sociais (Instagram, Facebook, LinkedIn, YouTube, site). No fórum, o nome do autor abre o perfil dele.
+- **Participantes**: lista de especialistas e instrutores (filtro por perfil e busca). O perfil mostra as turmas, o progresso e as postagens no fórum, mas não o conteúdo dos módulos.
+- **Mensagens**: conversas diretas entre participantes, com contador de não lidas no menu.
 - **Fórum** com três áreas: Geral, Especialistas e Instrutores. Todos os cadastrados leem, publicam e respondem nas três. O autor pode apagar o que escreveu, e o admin pode apagar qualquer mensagem.
 - **Avisos**: o admin escreve avisos para todos, só especialistas ou só instrutores. Eles aparecem no painel de quem entra e no menu Avisos, com a contagem dos não lidos.
 - **Material**: o admin publica links (Google Drive, cartilhas, vídeos) nas categorias Geral, Especialista e Instrutor. Todos os cadastrados veem as três.

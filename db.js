@@ -97,6 +97,18 @@ const SCHEMA = `
     criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
   );
   CREATE INDEX IF NOT EXISTS perguntas_usuario_idx ON perguntas (usuario_id);
+
+  -- Mensagens diretas entre participantes.
+  CREATE TABLE IF NOT EXISTS mensagens (
+    id SERIAL PRIMARY KEY,
+    de_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    para_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    texto TEXT NOT NULL,
+    lida BOOLEAN NOT NULL DEFAULT false,
+    criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS mensagens_para_idx ON mensagens (para_id, lida);
+  CREATE INDEX IF NOT EXISTS mensagens_de_para_idx ON mensagens (de_id, para_id);
 `;
 
 let pronto;
@@ -144,6 +156,62 @@ module.exports = {
     um('UPDATE usuarios SET nome = $2, foto = $3, redes = $4 WHERE id = $1 RETURNING *', [id, nome, foto, JSON.stringify(redes)]),
 
   perfil: (id) => um('SELECT id, nome, tipo, foto, redes FROM usuarios WHERE id = $1', [id]),
+
+  // Lista pública de participantes (sem CPF).
+  participantes: () =>
+    todos(
+      `SELECT u.id, u.nome, u.tipo, u.foto,
+              (SELECT COUNT(*)::int FROM turmas t WHERE t.usuario_id = u.id) AS turmas
+         FROM usuarios u ORDER BY u.nome`
+    ),
+
+  // O que outros participantes podem ver: turmas (sem o conteúdo dos módulos) e postagens do fórum.
+  turmasPublicas: (usuarioId) =>
+    todos(
+      `SELECT t.id, t.cidade, t.sindicato, t.periodo AS horario, COUNT(m.id)::int AS modulos_enviados
+         FROM turmas t LEFT JOIN modulos m ON m.turma_id = t.id
+        WHERE t.usuario_id = $1 GROUP BY t.id ORDER BY t.id DESC`,
+      [usuarioId]
+    ),
+
+  postagensDoForum: (usuarioId) =>
+    todos(
+      `SELECT 'topico' AS tipo, t.id AS topico_id, t.titulo, t.forum, t.texto, t.criado_em
+         FROM forum_topicos t WHERE t.usuario_id = $1
+       UNION ALL
+       SELECT 'resposta', t.id, t.titulo, t.forum, r.texto, r.criado_em
+         FROM forum_respostas r JOIN forum_topicos t ON t.id = r.topico_id WHERE r.usuario_id = $1
+       ORDER BY criado_em DESC LIMIT 50`,
+      [usuarioId]
+    ),
+
+  conversas: (usuarioId) =>
+    todos(
+      `SELECT u.id, u.nome, u.tipo, u.foto, c.texto, c.criado_em, c.de_id,
+              (SELECT COUNT(*)::int FROM mensagens n WHERE n.de_id = u.id AND n.para_id = $1 AND NOT n.lida) AS nao_lidas
+         FROM (SELECT DISTINCT ON (outro) *, CASE WHEN de_id = $1 THEN para_id ELSE de_id END AS outro
+                 FROM mensagens WHERE de_id = $1 OR para_id = $1
+                ORDER BY outro, id DESC) c
+         JOIN usuarios u ON u.id = c.outro
+        ORDER BY c.id DESC`,
+      [usuarioId]
+    ),
+
+  async conversa(usuarioId, outroId) {
+    await q('UPDATE mensagens SET lida = true WHERE de_id = $2 AND para_id = $1 AND NOT lida', [usuarioId, outroId]);
+    return todos(
+      `SELECT * FROM mensagens WHERE (de_id = $1 AND para_id = $2) OR (de_id = $2 AND para_id = $1)
+        ORDER BY id DESC LIMIT 200`,
+      [usuarioId, outroId]
+    ).then((r) => r.reverse());
+  },
+
+  enviarMensagem: (de, para, texto) =>
+    um('INSERT INTO mensagens (de_id, para_id, texto) VALUES ($1, $2, $3) RETURNING *', [de, para, texto]),
+
+  async naoLidas(usuarioId) {
+    return (await um('SELECT COUNT(*)::int AS n FROM mensagens WHERE para_id = $1 AND NOT lida', [usuarioId])).n;
+  },
 
   async fotoDePerfil(url) {
     return Boolean(await um('SELECT 1 FROM usuarios WHERE foto = $1', [url]));

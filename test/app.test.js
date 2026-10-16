@@ -319,3 +319,37 @@ test('admin: ficha da pessoa com turmas e envios', async () => {
   r = await a(`/api/turmas/${turma.id}`);
   assert.equal(r.body.modulos[0].feedback, 'Ótimo');
 });
+
+test('participantes e mensagens diretas', async () => {
+  const a = cliente();
+  await a('/api/entrar', { json: { cpf: '529.982.247-25' } }); // especialista Maria (fluxo anterior)
+  const b = cliente();
+  await b('/api/entrar', { json: { cpf: '111.444.777-35' } }); // instrutor João
+  const idA = (await a('/api/eu')).body.usuario.id;
+  const idB = (await b('/api/eu')).body.usuario.id;
+
+  let r = await b('/api/participantes');
+  assert.ok(r.body.participantes.some((p) => p.id === idA && p.tipo === 'especialista'));
+  assert.ok(r.body.participantes.every((p) => p.cpf === undefined));
+
+  // Perfil de outro: turmas e fórum, sem conteúdo dos módulos
+  r = await b(`/api/perfil/${idA}`);
+  assert.ok(Array.isArray(r.body.turmas) && Array.isArray(r.body.postagens));
+  assert.ok(r.body.turmas.every((t) => t.dados === undefined && t.texto === undefined));
+
+  assert.equal((await a(`/api/mensagens/${idA}`, { json: { texto: 'eu' } })).status, 404);
+  assert.equal((await a(`/api/mensagens/${idB}`, { json: { texto: ' ' } })).status, 400);
+  assert.equal((await a(`/api/mensagens/${idB}`, { json: { texto: 'Oi João!' } })).status, 200);
+  assert.equal((await a(`/api/mensagens/${idB}`, { json: { texto: 'Tudo bem?' } })).status, 200);
+  assert.equal((await b('/api/mensagens/nao-lidas')).body.total, 2);
+  r = await b('/api/mensagens');
+  assert.equal(r.body.conversas[0].id, idA);
+  assert.equal(r.body.conversas[0].nao_lidas, 2);
+  assert.equal(r.body.conversas[0].texto, 'Tudo bem?');
+  r = await b(`/api/mensagens/${idA}`);
+  assert.deepEqual(r.body.mensagens.map((m) => m.texto), ['Oi João!', 'Tudo bem?']);
+  assert.equal((await b('/api/mensagens/nao-lidas')).body.total, 0);
+  await b(`/api/mensagens/${idA}`, { json: { texto: 'Tudo ótimo.' } });
+  assert.equal((await a('/api/mensagens')).body.conversas[0].nao_lidas, 1);
+  assert.equal((await cliente()('/api/mensagens')).status, 401);
+});

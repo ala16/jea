@@ -221,7 +221,39 @@ app.get('/api/perfil/:id', exigirLeitorForum, async (req, res) => {
   const id = Number(req.params.id);
   const perfil = Number.isInteger(id) ? await db.perfil(id) : null;
   if (!perfil) return res.status(404).json({ erro: 'Perfil não encontrado.' });
-  res.json({ perfil });
+  // Turmas e postagens do fórum ficam visíveis; o conteúdo dos módulos não.
+  const [turmas, postagens] = await Promise.all([db.turmasPublicas(id), db.postagensDoForum(id)]);
+  res.json({ perfil, turmas, postagens });
+});
+
+app.get('/api/participantes', exigirLeitorForum, async (req, res) => {
+  res.json({ participantes: await db.participantes() });
+});
+
+// Mensagens diretas entre participantes.
+app.get('/api/mensagens', exigirUsuario, async (req, res) => {
+  res.json({ conversas: await db.conversas(req.usuario.id) });
+});
+
+app.get('/api/mensagens/nao-lidas', exigirUsuario, async (req, res) => {
+  res.json({ total: await db.naoLidas(req.usuario.id) });
+});
+
+async function carregarOutro(req, res, next) {
+  const id = Number(req.params.id);
+  req.outro = Number.isInteger(id) && id !== req.usuario.id ? await db.perfil(id) : null;
+  if (!req.outro) return res.status(404).json({ erro: 'Participante não encontrado.' });
+  next();
+}
+
+app.get('/api/mensagens/:id', exigirUsuario, carregarOutro, async (req, res) => {
+  res.json({ outro: req.outro, mensagens: await db.conversa(req.usuario.id, req.outro.id) });
+});
+
+app.post('/api/mensagens/:id', exigirUsuario, carregarOutro, async (req, res) => {
+  const corpo = texto(req.body.texto).trim();
+  if (!corpo) return res.status(400).json({ erro: 'Escreva a mensagem.' });
+  res.json({ mensagem: await db.enviarMensagem(req.usuario.id, req.outro.id, corpo) });
 });
 
 // Turmas

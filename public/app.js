@@ -141,6 +141,8 @@ function topoDoUsuario(u) {
       <a href="#/material" data-area="material">Material</a>
       <a href="#/avisos" data-area="avisos">Avisos<span class="badge" id="badge-avisos" hidden></span></a>
       <a href="#/forum/geral" data-area="forum">Fórum</a>
+      <a href="#/participantes" data-area="participantes">Participantes</a>
+      <a href="#/mensagens" data-area="mensagens">Mensagens<span class="badge" id="badge-mensagens" hidden></span></a>
       <a href="#/perguntas" data-area="perguntas">Perguntas</a>
     </nav>
     <div class="usuario">
@@ -149,6 +151,7 @@ function topoDoUsuario(u) {
     </div>`, '#/painel');
   estado.avisos = api('/api/avisos').then((r) => r.avisos).catch(() => []);
   estado.avisos.then(mostrarNaoLidos);
+  api('/api/mensagens/nao-lidas').then(({ total }) => mostrarMensagensNaoLidas(total)).catch(() => {});
 }
 
 function topoDoAdmin() {
@@ -158,9 +161,17 @@ function topoDoAdmin() {
       <a href="#/material" data-area="material">Material</a>
       <a href="#/perguntas" data-area="perguntas">Perguntas<span class="badge" id="badge-perguntas" hidden></span></a>
       <a href="#/forum/geral" data-area="forum">Fórum</a>
+      <a href="#/participantes" data-area="participantes">Participantes</a>
     </nav>
     <div class="usuario"><span>Admin</span><button data-sair>Sair</button></div>`, '#/admin');
   api('/api/perguntas').then(({ perguntas }) => mostrarPendentes(perguntas)).catch(() => {});
+}
+
+function mostrarMensagensNaoLidas(n) {
+  const badge = document.getElementById('badge-mensagens');
+  if (!badge) return;
+  badge.textContent = n;
+  badge.hidden = !n;
 }
 
 function mostrarPendentes(perguntas) {
@@ -898,29 +909,191 @@ async function telaPerfil() {
   };
 }
 
+const NOME_FORUM = { geral: 'Geral', especialista: 'Especialistas', instrutor: 'Instrutores' };
+const nomeTipo = (t) => (t === 'especialista' ? 'Especialista' : 'Instrutor');
+
 async function telaVerPerfil(id) {
+  const minhaRota = rotaAtual;
   const leitor = await leitorDoForum();
   if (!leitor) return;
-  let perfil;
+  let dados;
   try {
-    ({ perfil } = await api(`/api/perfil/${encodeURIComponent(id)}`));
+    dados = await api(`/api/perfil/${encodeURIComponent(id)}`);
   } catch (err) {
     if (err.status === 401) return ir('#/');
     avisar(err.message);
-    return history.back();
+    return ir('#/participantes');
   }
+  if (minhaRota !== rotaAtual) return;
+  const { perfil, turmas, postagens } = dados;
   const meu = leitor.usuario?.id === perfil.id;
   app.innerHTML = `
-    <p><a href="javascript:history.back()">← Voltar</a></p>
+    <p><a href="#/participantes">← Participantes</a></p>
     <div class="cartao perfil-publico">
       ${avatar(perfil.foto, 'enorme')}
       <div>
         <h1>${esc(perfil.nome)}</h1>
-        <span class="tag">${perfil.tipo === 'especialista' ? 'Especialista' : 'Instrutor'}</span>
+        <span class="tag">${nomeTipo(perfil.tipo)}</span>
         ${linksRedes(perfil.redes) || '<p class="meta">Nenhuma rede social informada.</p>'}
-        ${meu ? '<p><a class="botao" href="#/perfil">Editar meu perfil</a></p>' : ''}
+        <p class="linha-botoes">
+          ${meu ? '<a class="botao" href="#/perfil">Editar meu perfil</a>' : ''}
+          ${!meu && leitor.usuario ? `<a class="botao" href="#/mensagens/${perfil.id}">Enviar mensagem</a>` : ''}
+          ${leitor.admin ? `<a class="botao secundario" href="#/admin/usuario/${perfil.id}">Ver envios (admin)</a>` : ''}
+        </p>
       </div>
-    </div>`;
+    </div>
+    <h2>Turmas <span class="meta">(${turmas.length})</span></h2>
+    <div class="lista-turmas">
+      ${turmas.map((t) => `
+        <div class="cartao turma">
+          <h3>${esc(t.cidade)}</h3>
+          <div class="meta">${esc(t.sindicato)}</div>
+          <div class="meta">Horário: ${esc(t.horario)}</div>
+          ${barraProgresso(t.modulos_enviados)}
+          <div class="meta">${t.modulos_enviados} de 8 módulos enviados</div>
+        </div>`).join('')}
+    </div>
+    ${turmas.length ? '' : '<div class="vazio">Nenhuma turma cadastrada.</div>'}
+    <h2>Postagens no fórum <span class="meta">(${postagens.length})</span></h2>
+    ${postagens.map((p) => `
+      <a class="cartao topico" href="#/forum/topico/${p.topico_id}">
+        <div class="meta">${p.tipo === 'topico' ? 'Criou o tópico' : 'Respondeu em'} · Fórum ${NOME_FORUM[p.forum] || ''} · ${esc(formatarData(p.criado_em))}</div>
+        <h3>${esc(p.titulo)}</h3>
+        ${p.texto ? `<div class="meta trecho">${esc(p.texto.slice(0, 200))}${p.texto.length > 200 ? '…' : ''}</div>` : ''}
+      </a>`).join('') || '<div class="vazio">Nenhuma postagem no fórum.</div>'}`;
+}
+
+// ---------- participantes ----------
+
+async function telaParticipantes() {
+  const minhaRota = rotaAtual;
+  const leitor = await leitorDoForum();
+  if (!leitor) return;
+  let participantes;
+  try {
+    ({ participantes } = await api('/api/participantes'));
+  } catch (err) {
+    if (err.status === 401) return ir('#/');
+    throw err;
+  }
+  if (minhaRota !== rotaAtual) return;
+  const contar = (t) => participantes.filter((p) => p.tipo === t).length;
+  const filtro = { tipo: '', busca: '' };
+  app.innerHTML = `
+    <h1>Participantes</h1>
+    <p class="sub">Especialistas e instrutores cadastrados. Abra o perfil para ver as turmas e as postagens no fórum${leitor.usuario ? ', ou envie uma mensagem' : ''}.</p>
+    <nav class="abas" id="abas">
+      <a href="#" data-tipo="" class="ativa">Todos (${participantes.length})</a>
+      <a href="#" data-tipo="especialista">Especialistas (${contar('especialista')})</a>
+      <a href="#" data-tipo="instrutor">Instrutores (${contar('instrutor')})</a>
+    </nav>
+    <input id="busca" type="text" placeholder="Buscar pelo nome">
+    <div class="lista-participantes" id="lista"></div>`;
+  const lista = document.getElementById('lista');
+  const desenhar = () => {
+    const termo = filtro.busca.toLowerCase();
+    const itens = participantes.filter((p) => (!filtro.tipo || p.tipo === filtro.tipo) && p.nome.toLowerCase().includes(termo));
+    lista.innerHTML = itens.map((p) => `
+      <div class="cartao participante">
+        ${avatar(p.foto, 'grande')}
+        <div class="info">
+          <h3>${esc(p.nome)}</h3>
+          <span class="tag">${nomeTipo(p.tipo)}</span>
+          <div class="meta">${p.turmas} turma${p.turmas === 1 ? '' : 's'}</div>
+        </div>
+        <div class="acoes">
+          <a class="botao secundario" href="#/perfil/${p.id}">Ver perfil</a>
+          ${leitor.usuario && leitor.usuario.id !== p.id ? `<a class="botao" href="#/mensagens/${p.id}">Mensagem</a>` : ''}
+        </div>
+      </div>`).join('') || '<div class="vazio">Ninguém encontrado.</div>';
+  };
+  desenhar();
+  document.getElementById('abas').onclick = (ev) => {
+    const a = ev.target.closest('[data-tipo]');
+    if (!a) return;
+    ev.preventDefault();
+    filtro.tipo = a.dataset.tipo;
+    document.querySelectorAll('#abas a').forEach((x) => x.classList.toggle('ativa', x === a));
+    desenhar();
+  };
+  document.getElementById('busca').oninput = (ev) => { filtro.busca = ev.target.value.trim(); desenhar(); };
+}
+
+// ---------- mensagens ----------
+
+async function telaMensagens() {
+  const u = await exigirUsuario();
+  if (!u) return;
+  const { conversas } = await api('/api/mensagens');
+  app.innerHTML = `
+    <div class="cabecalho">
+      <div><h1>Mensagens</h1><p class="sub">Converse com outros especialistas e instrutores.</p></div>
+      <a class="botao-grande" href="#/participantes">+ Nova mensagem</a>
+    </div>
+    ${conversas.map((c) => `
+      <a class="cartao conversa ${c.nao_lidas ? 'nova' : ''}" href="#/mensagens/${c.id}">
+        ${avatar(c.foto, 'grande')}
+        <div class="info">
+          <h3>${esc(c.nome)} <span class="tag">${nomeTipo(c.tipo)}</span>${c.nao_lidas ? ` <span class="badge">${c.nao_lidas}</span>` : ''}</h3>
+          <div class="meta trecho">${c.de_id === u.id ? 'Você: ' : ''}${esc(c.texto.slice(0, 120))}</div>
+        </div>
+        <span class="meta">${esc(formatarData(c.criado_em))}</span>
+      </a>`).join('') || '<div class="vazio">Nenhuma conversa ainda. Clique em <strong>+ Nova mensagem</strong> para escolher alguém.</div>'}`;
+}
+
+async function telaConversa(id) {
+  const u = await exigirUsuario();
+  if (!u) return;
+  let dados;
+  try {
+    dados = await api(`/api/mensagens/${encodeURIComponent(id)}`);
+  } catch (err) {
+    avisar(err.message);
+    return ir('#/mensagens');
+  }
+  const { outro, mensagens } = dados;
+  api('/api/mensagens/nao-lidas').then(({ total }) => mostrarMensagensNaoLidas(total)).catch(() => {});
+  app.innerHTML = `
+    <p><a href="#/mensagens">← Mensagens</a></p>
+    <div class="cabecalho-conversa">
+      ${avatar(outro.foto, 'grande')}
+      <div><h1><a href="#/perfil/${outro.id}">${esc(outro.nome)}</a></h1><span class="tag">${nomeTipo(outro.tipo)}</span></div>
+    </div>
+    <div class="cartao chat" id="chat">
+      ${mensagens.map((m) => `
+        <div class="bolha ${m.de_id === u.id ? 'minha' : ''}">
+          <div class="mensagem">${esc(m.texto)}</div>
+          <div class="hora">${esc(formatarData(m.criado_em))}</div>
+        </div>`).join('') || `<p class="meta" style="text-align:center">Escreva a primeira mensagem para ${esc(outro.nome.split(' ')[0])}.</p>`}
+    </div>
+    <form id="f" class="enviar-mensagem">
+      <textarea id="texto" name="texto" maxlength="${MAX}" placeholder="Escreva sua mensagem" required></textarea>
+      <button type="submit">Enviar</button>
+    </form>`;
+  const chat = document.getElementById('chat');
+  chat.scrollTop = chat.scrollHeight;
+  const f = document.getElementById('f');
+  f.texto.focus();
+  // Enter envia; Shift+Enter quebra a linha.
+  f.texto.onkeydown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      f.requestSubmit();
+    }
+  };
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const botao = f.querySelector('button');
+    if (botao.disabled || !f.texto.value.trim()) return;
+    botao.disabled = true;
+    try {
+      await api(`/api/mensagens/${outro.id}`, { json: { texto: f.texto.value } });
+      telaConversa(outro.id);
+    } catch (err) {
+      avisar(err.message);
+      botao.disabled = false;
+    }
+  };
 }
 
 // ---------- material ----------
@@ -1413,6 +1586,8 @@ async function rotear() {
       case 'admin': return partes[1] === 'usuario' ? await telaAdminUsuario(partes[2]) : await telaAdmin();
       case 'avisos': return await telaAvisos();
       case 'material': return await telaMaterial();
+      case 'participantes': return await telaParticipantes();
+      case 'mensagens': return partes[1] ? await telaConversa(partes[1]) : await telaMensagens();
       case 'perguntas': return await telaPerguntas();
       case 'perfil': return partes[1] ? await telaVerPerfil(partes[1]) : await telaPerfil();
       case 'admin-avisos': return await telaAdminAvisos();
