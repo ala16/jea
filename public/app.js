@@ -118,8 +118,10 @@ async function carregarUsuario() {
   }
 }
 
-function desenharTopo(conteudo) {
+function desenharTopo(conteudo, inicio = '#/') {
   topoUsuario.innerHTML = conteudo || '';
+  // O logo JEA leva para a tela principal de quem está logado.
+  document.querySelector('.marca').setAttribute('href', inicio);
   const sair = topoUsuario.querySelector('[data-sair]');
   if (sair) sair.onclick = async () => { await api('/api/sair', { method: 'POST' }); ir('#/'); };
   // Destaca no menu a área em que a pessoa está.
@@ -144,7 +146,7 @@ function topoDoUsuario(u) {
     <div class="usuario">
       <a class="meu-perfil" href="#/perfil" title="Editar meu perfil">${avatar(u.foto)}<span>${esc(u.nome.split(' ')[0])} · ${u.tipo === 'especialista' ? 'Especialista' : 'Instrutor'}</span><span class="lapis" aria-hidden="true">✎</span></a>
       <button data-sair>Sair</button>
-    </div>`);
+    </div>`, '#/painel');
   estado.avisos = api('/api/avisos').then((r) => r.avisos).catch(() => []);
   estado.avisos.then(mostrarNaoLidos);
 }
@@ -157,7 +159,7 @@ function topoDoAdmin() {
       <a href="#/perguntas" data-area="perguntas">Perguntas<span class="badge" id="badge-perguntas" hidden></span></a>
       <a href="#/forum/geral" data-area="forum">Fórum</a>
     </nav>
-    <div class="usuario"><span>Admin</span><button data-sair>Sair</button></div>`);
+    <div class="usuario"><span>Admin</span><button data-sair>Sair</button></div>`, '#/admin');
   api('/api/perguntas').then(({ perguntas }) => mostrarPendentes(perguntas)).catch(() => {});
 }
 
@@ -205,7 +207,10 @@ function cartaoAviso(a, { novo, apagar } = {}) {
 
 // ---------- telas ----------
 
-function telaInicio() {
+async function telaInicio() {
+  // Quem já está logado não precisa ver o login de novo.
+  const r = await carregarUsuario();
+  if (r) return ir(r.usuario ? '#/painel' : '#/cadastro');
   desenharTopo('');
   app.innerHTML = `
     <div class="centro cartao entrada">
@@ -1290,7 +1295,7 @@ async function rotear() {
   const partes = location.hash.replace(/^#\/?/, '').split('/');
   try {
     switch (partes[0]) {
-      case '': return telaInicio();
+      case '': return await telaInicio();
       case 'cadastro': return await telaCadastro();
       case 'painel': return await telaPainel();
       case 'turma': return await telaTurma(partes[1], partes[2]);
