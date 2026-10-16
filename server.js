@@ -245,7 +245,7 @@ app.post('/api/turmas/:turmaId/modulos/:numero', exigirUsuario, carregarTurma, a
   res.json({ modulo });
 });
 
-// Fórum: todos leem os três fóruns; cada um publica no geral e no fórum do seu perfil.
+// Fórum: todos os cadastrados leem e publicam nos três fóruns.
 // O admin lê tudo e pode apagar qualquer mensagem.
 const FORUNS = ['geral', 'especialista', 'instrutor'];
 
@@ -257,20 +257,19 @@ async function exigirLeitorForum(req, res, next) {
   await exigirUsuario(req, res, next);
 }
 
-function podePublicar(usuario, forum) {
-  return Boolean(usuario) && (forum === 'geral' || forum === usuario.tipo);
+function podePublicar(usuario) {
+  return Boolean(usuario);
 }
 
 app.get('/api/forum/:forum', exigirLeitorForum, async (req, res) => {
   const forum = req.params.forum;
   if (!FORUNS.includes(forum)) return res.status(404).json({ erro: 'Fórum não encontrado.' });
-  res.json({ topicos: await db.topicos(forum), podePublicar: podePublicar(req.usuario, forum) });
+  res.json({ topicos: await db.topicos(forum), podePublicar: podePublicar(req.usuario) });
 });
 
 app.post('/api/forum/:forum', exigirUsuario, async (req, res) => {
   const forum = req.params.forum;
   if (!FORUNS.includes(forum)) return res.status(404).json({ erro: 'Fórum não encontrado.' });
-  if (!podePublicar(req.usuario, forum)) return res.status(403).json({ erro: 'Você pode ler este fórum, mas não publicar nele.' });
   const titulo = texto(req.body.titulo, 200).trim();
   const corpo = texto(req.body.texto).trim();
   if (!titulo || !corpo) return res.status(400).json({ erro: 'Escreva o título e a mensagem.' });
@@ -288,16 +287,13 @@ app.get('/api/forum/topico/:id', exigirLeitorForum, carregarTopico, async (req, 
   res.json({
     topico: req.topico,
     respostas: await db.respostas(req.topico.id),
-    podePublicar: podePublicar(req.usuario, req.topico.forum),
+    podePublicar: podePublicar(req.usuario),
     usuarioId: req.usuario?.id || null,
     admin: Boolean(req.admin),
   });
 });
 
 app.post('/api/forum/topico/:id/respostas', exigirUsuario, carregarTopico, async (req, res) => {
-  if (!podePublicar(req.usuario, req.topico.forum)) {
-    return res.status(403).json({ erro: 'Você pode ler este fórum, mas não responder nele.' });
-  }
   const corpo = texto(req.body.texto).trim();
   if (!corpo) return res.status(400).json({ erro: 'Escreva a resposta.' });
   res.json({ resposta: await db.responder({ topicoId: req.topico.id, usuarioId: req.usuario.id, texto: corpo }) });
