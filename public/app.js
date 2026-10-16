@@ -68,11 +68,40 @@ function ehImagem(nome) {
   return /\.(png|jpe?g|gif|webp|bmp|heic|avif)$/i.test(nome || '');
 }
 
-function blocoAnexo(arquivo, nomeOriginal) {
-  if (!arquivo) return '';
-  const url = esc(arquivo);
-  return `<div class="anexo-atual">Arquivo atual: <a href="${url}" target="_blank" rel="noopener">${esc(nomeOriginal || arquivo)}</a>
-    ${ehImagem(arquivo) ? `<img src="${url}" alt="" loading="lazy">` : ''}</div>`;
+// Lista os anexos já enviados ([{ url, nome }]). Com removivel, cada um ganha a opção de remover.
+function blocoAnexos(anexos, removivel = false) {
+  if (!anexos?.length) return '';
+  return `<ul class="anexos-atuais">${anexos.map((a) => {
+    const url = esc(a.url);
+    return `<li class="anexo-atual"><a href="${url}" target="_blank" rel="noopener">${esc(a.nome || a.url)}</a>
+      ${ehImagem(a.url) ? `<img src="${url}" alt="" loading="lazy">` : ''}
+      ${removivel ? `<label class="remover-anexo"><input type="checkbox" name="removerAnexos" value="${url}"> remover</label>` : ''}</li>`;
+  }).join('')}</ul>`;
+}
+
+// Campo de arquivo que aceita vários de uma vez; mostra o que foi escolhido antes de enviar.
+function campoArquivos(id, rotulo, { imagem = false, ajuda = '', atuais = [] } = {}) {
+  return `<div>
+      <label for="${id}">${rotulo}</label>
+      <p class="ajuda">${ajuda || (imagem ? 'Selecione uma ou mais imagens' : 'Selecione um ou mais arquivos')}</p>
+      <input id="${id}" name="${id}" type="file" multiple ${imagem ? 'accept="image/*"' : ''}>
+      <ul class="escolhidos"></ul>
+      ${blocoAnexos(atuais, true)}
+    </div>`;
+}
+
+document.addEventListener('change', (ev) => {
+  const input = ev.target;
+  if (!input.matches?.('input[type=file][multiple]')) return;
+  const lista = input.nextElementSibling;
+  if (!lista?.classList.contains('escolhidos')) return;
+  lista.innerHTML = [...input.files].map((f) => `<li>${esc(f.name)} <span class="meta">(${tamanho(f.size)})</span></li>`).join('');
+});
+
+function tamanho(bytes) {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 / 1024).toFixed(1).replace('.', ',')} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(1).replace('.', ',')} GB`;
 }
 
 // ---------- upload ----------
@@ -111,7 +140,6 @@ async function reduzirImagem(arquivo, ladoMaximo = LADO_MAXIMO) {
 // Fotos de perfil aparecem pequenas (e 500 de uma vez em Participantes): bastam 400px.
 async function enviarArquivo(arquivo, imagem, ladoMaximo) {
   if (arquivo.type.startsWith('image/')) arquivo = await reduzirImagem(arquivo, ladoMaximo);
-  if (arquivo.size > 5 * 1024 * 1024) throw new Error('Arquivo maior que 5MB.');
   if (imagem && !arquivo.type.startsWith('image/')) throw new Error('O arquivo precisa ser uma imagem.');
   const { uploadDireto } = await obterConfig();
   if (!uploadDireto) {
@@ -126,8 +154,20 @@ async function enviarArquivo(arquivo, imagem, ladoMaximo) {
     access: 'public',
     handleUploadUrl: '/api/blob',
     clientPayload: imagem ? 'imagem' : '',
+    // Arquivos grandes vão em partes: mais rápido e sem limite de tamanho.
+    multipart: arquivo.size > 20 * 1024 * 1024,
   });
   return { url: blob.url, nome: arquivo.name };
+}
+
+// Envia vários arquivos, um por vez, mostrando o andamento no botão.
+async function enviarArquivos(arquivos, imagem, botao) {
+  const enviados = [];
+  for (const [i, arquivo] of [...arquivos].entries()) {
+    if (botao) botao.textContent = arquivos.length > 1 ? `Enviando arquivo ${i + 1} de ${arquivos.length}...` : 'Enviando arquivo...';
+    enviados.push(await enviarArquivo(arquivo, imagem));
+  }
+  return enviados;
 }
 
 // ---------- sessão ----------
@@ -359,7 +399,7 @@ async function telaCadastro() {
         <div class="secao-form">
           <h2>Opcional</h2>
           <p class="ajuda">Pode deixar em branco e completar depois em Meu perfil. Nas redes, cole o link do seu perfil.</p>
-          <label for="foto">Foto do perfil ${OPCIONAL} <span class="ajuda">(até 5MB)</span></label>
+          <label for="foto">Foto do perfil ${OPCIONAL}</label>
           <div class="foto-perfil"><span class="avatar grande" id="previa"></span><input id="foto" name="foto" type="file" accept="image/*"></div>
           ${camposRedes()}
         </div>
@@ -606,12 +646,7 @@ function formModulo1Especialista(m) {
     }
     html += campoTexto(c, dados[c.chave]);
   }
-  html += `<div>
-      <label for="anexo">Foto da expedição</label>
-      <p class="ajuda">Selecionar foto (até 5MB)</p>
-      <input id="anexo" name="anexo" type="file" accept="image/*">
-      ${blocoAnexo(m?.anexo, m?.anexo_nome)}
-    </div>`;
+  html += campoArquivos('anexos', 'Fotos da expedição', { imagem: true, ajuda: 'Selecione uma ou mais fotos', atuais: m?.anexos });
   if (aberto) html += '</div>';
   return html;
 }
@@ -619,12 +654,7 @@ function formModulo1Especialista(m) {
 function formModuloSimples(m, instrutor) {
   return `
     ${campoTexto({ chave: 'texto', rotulo: 'Texto', max: MAX }, m?.texto)}
-    <div>
-      <label for="anexo">${instrutor ? 'Imagem' : 'Anexo'}</label>
-      <p class="ajuda">${instrutor ? 'Selecionar imagem (até 5MB)' : 'Selecionar arquivo (até 5MB)'}</p>
-      <input id="anexo" name="anexo" type="file" ${instrutor ? 'accept="image/*"' : ''}>
-      ${blocoAnexo(m?.anexo, m?.anexo_nome)}
-    </div>`;
+    ${campoArquivos('anexos', instrutor ? 'Imagens' : 'Anexos', { imagem: instrutor, atuais: m?.anexos })}`;
 }
 
 async function telaTurma(turmaId, numero) {
@@ -669,7 +699,6 @@ async function telaTurma(turmaId, numero) {
         <div class="erro" id="erro"></div>
         <div class="linha-botoes">
           <button type="submit">${m ? 'Salvar alterações' : 'Enviar módulo'}</button>
-          ${m?.anexo ? '<label style="margin:0;font-weight:400"><input type="checkbox" name="removerAnexo" value="1"> remover arquivo atual</label>' : ''}
         </div>
       </form>
     </div>
@@ -707,12 +736,8 @@ async function telaTurma(turmaId, numero) {
     try {
       const corpo = {};
       for (const el of f.querySelectorAll('input[type=text], textarea')) corpo[el.name] = el.value;
-      corpo.removerAnexo = Boolean(f.removerAnexo?.checked);
-      const arquivo = f.anexo.files[0];
-      if (arquivo) {
-        botao.textContent = 'Enviando arquivo...';
-        corpo.anexo = await enviarArquivo(arquivo, instrutor || especial);
-      }
+      corpo.removerAnexos = [...f.querySelectorAll('input[name=removerAnexos]:checked')].map((c) => c.value);
+      corpo.anexos = await enviarArquivos(f.anexos.files, instrutor || especial, botao);
       await api(`/api/turmas/${turma.id}/modulos/${numero}`, { json: corpo });
       avisar(`Módulo ${numero} salvo.`);
       telaTurma(turma.id, numero);
@@ -858,7 +883,7 @@ function detalheEnvio(e, mostrarFeedback = true) {
     itens.push(['Texto', e.texto]);
   }
   return `<dl>${itens.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v) || '<span class="meta">(vazio)</span>'}</dd>`).join('')}</dl>
-    ${blocoAnexo(e.anexo, e.anexo_nome)}
+    ${blocoAnexos(e.anexos)}
     ${mostrarFeedback && e.feedback ? `<div class="feedback" style="margin-top:12px"><strong>Feedback enviado (${esc(formatarData(e.feedback_em))}):</strong>\n${esc(e.feedback)}</div>` : ''}`;
 }
 
@@ -1011,7 +1036,7 @@ async function telaPerfil() {
     <p class="sub">Os campos com ${OBRIG} são obrigatórios; o resto é opcional. Seu e-mail e CPF só o gestor vê; o WhatsApp aparece no seu perfil.</p>
     ${faltando.length ? `<p class="alerta-email">Falta ${faltando.join(' e ')}. Preencha abaixo e salve o perfil.</p>` : ''}
     <form id="f" class="cartao">
-      <label style="margin-top:0">Foto do perfil ${OPCIONAL} <span class="ajuda">(até 5MB)</span></label>
+      <label style="margin-top:0">Foto do perfil ${OPCIONAL}</label>
       <div class="foto-perfil">
         <span class="avatar grande" id="previa" style="${u.foto ? `background-image:url('${esc(u.foto)}')` : ''}"></span>
         <div style="flex:1">
@@ -1592,8 +1617,8 @@ function autor(item, link = true) {
   return `<span class="autor">${foto}${nome}${tipo ? `<span class="tag">${tipo}</span>` : ''}</span>`;
 }
 
-function imagemForum(url) {
-  return url ? `<a class="imagem-forum" href="${esc(url)}" target="_blank" rel="noopener"><img src="${esc(url)}" alt="Imagem enviada" loading="lazy"></a>` : '';
+function imagensForum(urls) {
+  return (urls || []).map((url) => `<a class="imagem-forum" href="${esc(url)}" target="_blank" rel="noopener"><img src="${esc(url)}" alt="Imagem enviada" loading="lazy"></a>`).join('');
 }
 
 async function telaForum(chave) {
@@ -1625,8 +1650,7 @@ async function telaForum(chave) {
           <label for="texto">Mensagem</label>
           <textarea id="texto" name="texto" maxlength="${MAX}"></textarea>
           <div class="contador"></div>
-          <label for="imagem">Imagem <span class="ajuda">(opcional, até 5MB)</span></label>
-          <input id="imagem" name="imagem" type="file" accept="image/*">
+          ${campoArquivos('imagens', `Imagens ${OPCIONAL}`, { imagem: true })}
           <div class="erro" id="erro"></div>
           <div class="linha-botoes"><button type="submit">Publicar</button></div>
         </form>
@@ -1647,10 +1671,8 @@ async function telaForum(chave) {
     if (botao.disabled) return;
     botao.disabled = true;
     try {
-      const arquivo = f.imagem.files[0];
-      if (arquivo) botao.textContent = 'Enviando imagem...';
-      const imagem = arquivo ? await enviarArquivo(arquivo, true) : null;
-      const { topico } = await api(`/api/forum/${forum.chave}`, { json: { titulo: f.titulo.value, texto: f.texto.value, imagem } });
+      const imagens = (await enviarArquivos(f.imagens.files, true, botao)).map((a) => a.url);
+      const { topico } = await api(`/api/forum/${forum.chave}`, { json: { titulo: f.titulo.value, texto: f.texto.value, imagens } });
       ir(`#/forum/topico/${topico.id}`);
     } catch (err) {
       document.getElementById('erro').textContent = err.message;
@@ -1683,7 +1705,7 @@ async function telaTopico(id) {
       <div class="meta">${autor(topico)} · ${esc(formatarData(topico.criado_em))}
         ${podeApagar(topico) ? '<button class="link perigo" data-apagar-topico>apagar tópico</button>' : ''}</div>
       <div class="mensagem">${esc(topico.texto)}</div>
-      ${imagemForum(topico.imagem)}
+      ${imagensForum(topico.imagens)}
     </div>
     <h2>${respostas.length} resposta${respostas.length === 1 ? '' : 's'}</h2>
     ${respostas.map((r) => `
@@ -1691,15 +1713,14 @@ async function telaTopico(id) {
         <div class="meta">${autor(r)} · ${esc(formatarData(r.criado_em))}
           ${podeApagar(r) ? `<button class="link perigo" data-apagar-resposta="${r.id}">apagar</button>` : ''}</div>
         <div class="mensagem">${esc(r.texto)}</div>
-        ${imagemForum(r.imagem)}
+        ${imagensForum(r.imagens)}
       </div>`).join('')}
     ${podePublicar ? `
       <form id="f" class="cartao">
         <label for="texto" style="margin-top:0">Sua resposta</label>
         <textarea id="texto" name="texto" maxlength="${MAX}"></textarea>
         <div class="contador"></div>
-        <label for="imagem">Imagem <span class="ajuda">(opcional, até 5MB)</span></label>
-        <input id="imagem" name="imagem" type="file" accept="image/*">
+        ${campoArquivos('imagens', `Imagens ${OPCIONAL}`, { imagem: true })}
         <div class="erro" id="erro"></div>
         <div class="linha-botoes"><button type="submit">Responder</button></div>
       </form>` : ''}`;
@@ -1731,10 +1752,8 @@ async function telaTopico(id) {
     if (botao.disabled) return;
     botao.disabled = true;
     try {
-      const arquivo = f.imagem.files[0];
-      if (arquivo) botao.textContent = 'Enviando imagem...';
-      const imagem = arquivo ? await enviarArquivo(arquivo, true) : null;
-      await api(`/api/forum/topico/${topico.id}/respostas`, { json: { texto: f.texto.value, imagem } });
+      const imagens = (await enviarArquivos(f.imagens.files, true, botao)).map((a) => a.url);
+      await api(`/api/forum/topico/${topico.id}/respostas`, { json: { texto: f.texto.value, imagens } });
       telaTopico(topico.id);
     } catch (err) {
       document.getElementById('erro').textContent = err.message;

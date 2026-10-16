@@ -129,6 +129,17 @@ const SCHEMA = `
     PRIMARY KEY (aviso_id, usuario_id)
   );
   CREATE INDEX IF NOT EXISTS avisos_ciente_usuario_idx ON avisos_ciente (usuario_id);
+
+  -- Vários anexos por módulo ([{ url, nome }]) e várias imagens por postagem do fórum ([url]).
+  -- As colunas antigas de um arquivo só são copiadas para as novas e esvaziadas.
+  ALTER TABLE modulos ADD COLUMN IF NOT EXISTS anexos JSONB NOT NULL DEFAULT '[]';
+  UPDATE modulos SET anexos = jsonb_build_array(jsonb_build_object('url', anexo, 'nome', COALESCE(anexo_nome, anexo))),
+         anexo = NULL, anexo_nome = NULL
+   WHERE anexo IS NOT NULL;
+  ALTER TABLE forum_topicos ADD COLUMN IF NOT EXISTS imagens JSONB NOT NULL DEFAULT '[]';
+  UPDATE forum_topicos SET imagens = jsonb_build_array(imagem), imagem = NULL WHERE imagem IS NOT NULL;
+  ALTER TABLE forum_respostas ADD COLUMN IF NOT EXISTS imagens JSONB NOT NULL DEFAULT '[]';
+  UPDATE forum_respostas SET imagens = jsonb_build_array(imagem), imagem = NULL WHERE imagem IS NOT NULL;
 `;
 
 // O esquema só é aplicado quando muda (a versão é o hash do texto). Assim cada nova instância
@@ -292,31 +303,34 @@ module.exports = {
   turma: (id) => um('SELECT *, periodo AS horario FROM turmas WHERE id = $1', [id]),
 
   async excluirTurma(id) {
-    const anexos = await todos('SELECT anexo FROM modulos WHERE turma_id = $1 AND anexo IS NOT NULL', [id]);
+    const anexos = await todos(
+      "SELECT a->>'url' AS url FROM modulos, jsonb_array_elements(anexos) a WHERE turma_id = $1",
+      [id]
+    );
     await q('DELETE FROM turmas WHERE id = $1', [id]);
-    return anexos.map((r) => r.anexo);
+    return anexos.map((r) => r.url);
   },
 
   modulosDaTurma: (turmaId) => todos('SELECT * FROM modulos WHERE turma_id = $1 ORDER BY numero', [turmaId]),
 
   modulo: (turmaId, numero) => um('SELECT * FROM modulos WHERE turma_id = $1 AND numero = $2', [turmaId, numero]),
 
-  salvarModulo: (turmaId, numero, { dados, texto, anexo, anexoNome }) =>
+  salvarModulo: (turmaId, numero, { dados, texto, anexos }) =>
     um(
-      `INSERT INTO modulos (turma_id, numero, dados, texto, anexo, anexo_nome)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO modulos (turma_id, numero, dados, texto, anexos)
+       VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (turma_id, numero) DO UPDATE SET
-         dados = excluded.dados, texto = excluded.texto, anexo = excluded.anexo,
-         anexo_nome = excluded.anexo_nome, atualizado_em = now()
+         dados = excluded.dados, texto = excluded.texto, anexos = excluded.anexos, atualizado_em = now()
        RETURNING *`,
-      [turmaId, numero, dados ? JSON.stringify(dados) : null, texto, anexo, anexoNome]
+      [turmaId, numero, dados ? JSON.stringify(dados) : null, texto, JSON.stringify(anexos)]
     ),
 
   async donoDoArquivo(url) {
     const r = await um(
       `SELECT cpf FROM usuarios WHERE foto = $1
        UNION SELECT u.cpf FROM modulos m JOIN turmas t ON t.id = m.turma_id
-              JOIN usuarios u ON u.id = t.usuario_id WHERE m.anexo = $1`,
+              JOIN usuarios u ON u.id = t.usuario_id
+              WHERE m.anexos @> jsonb_build_array(jsonb_build_object('url', $1::text))`,
       [url]
     );
     return r?.cpf || null;
@@ -393,24 +407,25 @@ module.exports = {
       [topicoId]
     ),
 
-  criarTopico: ({ forum, usuarioId, titulo, texto, imagem }) =>
+  criarTopico: ({ forum, usuarioId, titulo, texto, imagens }) =>
     um(
-      'INSERT INTO forum_topicos (forum, usuario_id, titulo, texto, imagem) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-      [forum, usuarioId, titulo, texto, imagem]
+      'INSERT INTO forum_topicos (forum, usuario_id, titulo, texto, imagens) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [forum, usuarioId, titulo, texto, JSON.stringify(imagens)]
     ),
 
-  responder: ({ topicoId, usuarioId, texto, imagem }) =>
-    um('INSERT INTO forum_respostas (topico_id, usuario_id, texto, imagem) VALUES ($1, $2, $3, $4) RETURNING id', [
+  responder: ({ topicoId, usuarioId, texto, imagens }) =>
+    um('INSERT INTO forum_respostas (topico_id, usuario_id, texto, imagens) VALUES ($1, $2, $3, $4) RETURNING id', [
       topicoId,
       usuarioId,
       texto,
-      imagem,
+      JSON.stringify(imagens),
     ]),
 
   // Imagens do fórum podem ser vistas por qualquer pessoa logada.
   async imagemDoForum(url) {
     const r = await um(
-      'SELECT 1 FROM forum_topicos WHERE imagem = $1 UNION SELECT 1 FROM forum_respostas WHERE imagem = $1',
+      `SELECT 1 FROM forum_topicos WHERE imagens @> jsonb_build_array($1::text)
+       UNION SELECT 1 FROM forum_respostas WHERE imagens @> jsonb_build_array($1::text)`,
       [url]
     );
     return Boolean(r);
@@ -421,17 +436,17 @@ module.exports = {
   // Apagam e devolvem as imagens que ficaram sem uso, para remover os arquivos.
   async excluirTopico(id) {
     const imgs = await todos(
-      `SELECT imagem FROM forum_topicos WHERE id = $1 AND imagem IS NOT NULL
-       UNION ALL SELECT imagem FROM forum_respostas WHERE topico_id = $1 AND imagem IS NOT NULL`,
+      `SELECT i AS url FROM forum_topicos, jsonb_array_elements_text(imagens) i WHERE id = $1
+       UNION ALL SELECT i FROM forum_respostas, jsonb_array_elements_text(imagens) i WHERE topico_id = $1`,
       [id]
     );
     await q('DELETE FROM forum_topicos WHERE id = $1', [id]);
-    return imgs.map((r) => r.imagem);
+    return imgs.map((r) => r.url);
   },
 
   async excluirResposta(id) {
-    const r = await um('DELETE FROM forum_respostas WHERE id = $1 RETURNING imagem', [id]);
-    return r?.imagem ? [r.imagem] : [];
+    const r = await um('DELETE FROM forum_respostas WHERE id = $1 RETURNING imagens', [id]);
+    return r?.imagens || [];
   },
 
   // Avisos do perfil da pessoa, com a data em que ela deu ciente (null se ainda não deu).
