@@ -320,3 +320,4 @@ main.largo { max-width: 1280px; }
   .menu a svg { width: 22px; height: 22px; }
   .menu .badge { left: auto; right: 6px; top: 4px; }
 }
+.botao.whatsapp { background: #25d366; border-color: #25d366; color: #fff; }
