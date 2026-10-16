@@ -32,7 +32,7 @@ p.sub { color: var(--suave); margin: 0 0 20px; }
 .centro { max-width: 420px; margin: 40px auto; }
 label { display: block; font-weight: 600; margin: 14px 0 4px; }
 .ajuda { color: var(--suave); font-size: 14px; margin: 0 0 6px; font-weight: 400; }
-input[type=text], input[type=password], textarea, select {
+input[type=text], input[type=password], input[type=email], input[type=tel], textarea, select {
   width: 100%; padding: 10px 12px; font: inherit;
   border: 1px solid var(--borda); border-radius: 8px; background: #fff;
 }
@@ -338,3 +338,12 @@ main.largo { max-width: 1280px; }
   .envio { grid-template-columns: 1fr; }
   .tabela-envios .col-fb { min-width: 260px; }
 }
+
+/* Campos obrigatórios e opcionais no cadastro e no perfil */
+.obrig { color: #c0392b; font-weight: 700; }
+.tag-opcional { display: inline-block; font-size: 12px; font-weight: 600; color: var(--suave); background: #eef2ef; border-radius: 999px; padding: 1px 8px; margin-left: 4px; vertical-align: 2px; }
+.secao-form { border-top: 1px solid #e3e8e4; margin-top: 22px; padding-top: 6px; }
+.secao-form h2 { margin-top: 12px; }
+.secao-form h2 + .ajuda { margin-bottom: 4px; }
+input[disabled] { background: #f3f5f4; color: var(--suave); }
+.alerta-email { background: #fff4e5; border: 1px solid #f0c48a; color: #7a4b00; border-radius: 10px; padding: 10px 14px; margin: 0 0 14px; }
