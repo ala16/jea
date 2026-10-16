@@ -440,7 +440,15 @@ app.delete('/api/forum/resposta/:id', exigirLeitorForum, async (req, res) => {
 const PUBLICOS = ['todos', 'especialista', 'instrutor'];
 
 app.get('/api/avisos', exigirLeitorForum, async (req, res) => {
-  res.json({ avisos: await db.avisos(req.admin ? null : req.usuario.tipo) });
+  res.json({ avisos: req.admin ? await db.avisosDoGestor() : await db.avisos(req.usuario) });
+});
+
+// Instrutores e especialistas confirmam que leram o aviso; o gestor vê quem deu ciente e quando.
+app.post('/api/avisos/:id/ciente', exigirUsuario, async (req, res) => {
+  const id = Number(req.params.id);
+  const em = Number.isInteger(id) ? await db.darCiente(id, req.usuario) : null;
+  if (!em) return res.status(404).json({ erro: 'Aviso não encontrado.' });
+  res.json({ ciente_em: em });
 });
 
 app.post('/api/admin/avisos', exigirAdmin, async (req, res) => {

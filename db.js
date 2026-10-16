@@ -120,6 +120,15 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS usuarios_foto_idx ON usuarios (foto);
   CREATE INDEX IF NOT EXISTS forum_topicos_imagem_idx ON forum_topicos (imagem);
   CREATE INDEX IF NOT EXISTS forum_respostas_imagem_idx ON forum_respostas (imagem);
+
+  -- "Ciente" dos avisos: o aviso fica pendente para a pessoa até ela clicar em Ciente.
+  CREATE TABLE IF NOT EXISTS avisos_ciente (
+    aviso_id INTEGER NOT NULL REFERENCES avisos(id) ON DELETE CASCADE,
+    usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (aviso_id, usuario_id)
+  );
+  CREATE INDEX IF NOT EXISTS avisos_ciente_usuario_idx ON avisos_ciente (usuario_id);
 `;
 
 // O esquema só é aplicado quando muda (a versão é o hash do texto). Assim cada nova instância
@@ -425,10 +434,37 @@ module.exports = {
     return r?.imagem ? [r.imagem] : [];
   },
 
-  avisos: (tipo) =>
-    tipo
-      ? todos("SELECT * FROM avisos WHERE publico IN ('todos', $1) ORDER BY id DESC", [tipo])
-      : todos('SELECT * FROM avisos ORDER BY id DESC'),
+  // Avisos do perfil da pessoa, com a data em que ela deu ciente (null se ainda não deu).
+  avisos: (usuario) =>
+    todos(
+      `SELECT a.*, c.criado_em AS ciente_em
+         FROM avisos a LEFT JOIN avisos_ciente c ON c.aviso_id = a.id AND c.usuario_id = $1
+        WHERE a.publico IN ('todos', $2) ORDER BY a.id DESC`,
+      [usuario.id, usuario.tipo]
+    ),
+
+  // Para o gestor: cada aviso com quem deu ciente (e quando) e quantas pessoas deveriam dar.
+  avisosDoGestor: () =>
+    todos(
+      `SELECT a.*,
+              (SELECT COUNT(*)::int FROM usuarios u WHERE a.publico = 'todos' OR u.tipo = a.publico) AS total_publico,
+              COALESCE((SELECT json_agg(json_build_object('id', u.id, 'nome', u.nome, 'tipo', u.tipo, 'em', c.criado_em)
+                                        ORDER BY c.criado_em DESC)
+                          FROM avisos_ciente c JOIN usuarios u ON u.id = c.usuario_id
+                         WHERE c.aviso_id = a.id), '[]'::json) AS cientes
+         FROM avisos a ORDER BY a.id DESC`
+    ),
+
+  async darCiente(avisoId, usuario) {
+    const r = await um(
+      `INSERT INTO avisos_ciente (aviso_id, usuario_id)
+         SELECT id, $2 FROM avisos WHERE id = $1 AND publico IN ('todos', $3)
+       ON CONFLICT (aviso_id, usuario_id) DO UPDATE SET aviso_id = excluded.aviso_id
+       RETURNING criado_em`,
+      [avisoId, usuario.id, usuario.tipo]
+    );
+    return r?.criado_em || null;
+  },
 
   criarAviso: ({ titulo, texto, publico }) =>
     um('INSERT INTO avisos (titulo, texto, publico) VALUES ($1, $2, $3) RETURNING *', [titulo, texto, publico]),

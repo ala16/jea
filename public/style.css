@@ -185,6 +185,13 @@ input[type=file] {
 .aviso-item .mensagem { margin-top: 6px; }
 .aviso-item.novo { border-left: 4px solid #f5b700; }
 .tag.novo { background: #f5b700; color: #1d2420; font-weight: 700; }
+.botao-ciente { margin-top: 12px; }
+.ciente-feito { margin: 12px 0 0; color: var(--verde); font-weight: 600; font-size: 15px; }
+.cientes { margin-top: 12px; border-top: 1px solid var(--borda); padding-top: 10px; }
+.cientes summary { cursor: pointer; color: var(--verde); font-weight: 600; }
+.cientes ul { list-style: none; margin: 8px 0 0; padding: 0; }
+.cientes li { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--borda); }
+.cientes li:last-child { border-bottom: 0; }
 .novo-topico summary { list-style: none; display: inline-block; padding: 10px 18px; border-radius: 8px; background: var(--verde); color: #fff; }
 .novo-topico summary::-webkit-details-marker { display: none; }
 .novo-topico[open] summary { margin-bottom: 8px; }

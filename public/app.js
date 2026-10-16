@@ -227,37 +227,41 @@ function mostrarPendentes(perguntas) {
   badge.hidden = !n;
 }
 
-// ---------- avisos (lidos ficam guardados no navegador) ----------
+// ---------- avisos (a notificação só some quando a pessoa clica em Ciente) ----------
 
 const PUBLICOS = { todos: 'Para todos', especialista: 'Para especialistas', instrutor: 'Para instrutores' };
-
-function chaveLidos() {
-  return `jea-avisos-lidos-${estado.usuario?.id || 0}`;
-}
-
-function ultimoLido() {
-  try { return Number(localStorage.getItem(chaveLidos())) || 0; } catch { return 0; }
-}
-
-function marcarLidos(avisos) {
-  try { localStorage.setItem(chaveLidos(), String(Math.max(ultimoLido(), ...avisos.map((a) => a.id)))); } catch { /* sem armazenamento */ }
-  mostrarNaoLidos(avisos);
-}
 
 function mostrarNaoLidos(avisos) {
   const badge = document.getElementById('badge-avisos');
   if (!badge) return;
-  const n = avisos.filter((a) => a.id > ultimoLido()).length;
+  const n = avisos.filter((a) => !a.ciente_em).length;
   badge.textContent = n;
   badge.hidden = !n;
 }
 
-function cartaoAviso(a, { novo, apagar } = {}) {
+function rodapeCiente(a) {
+  return a.ciente_em
+    ? `<p class="ciente-feito">✓ Você deu ciente em ${esc(formatarData(a.ciente_em))}</p>`
+    : `<button class="botao-ciente" data-ciente="${a.id}">👍 Ciente</button>`;
+}
+
+function listaCientes(a) {
+  const n = a.cientes.length;
+  return `<details class="cientes">
+      <summary>👍 ${n} de ${a.total_publico} deram ciente</summary>
+      ${n ? `<ul>${a.cientes.map((c) => `<li><span>${esc(c.nome)} <span class="tag">${nomeTipo(c.tipo)}</span></span>
+        <span class="meta">${esc(formatarData(c.em))}</span></li>`).join('')}</ul>` : '<p class="meta">Ninguém deu ciente ainda.</p>'}
+    </details>`;
+}
+
+function cartaoAviso(a, { gestor } = {}) {
+  const novo = !gestor && !a.ciente_em;
   return `<article class="cartao aviso-item ${novo ? 'novo' : ''}">
       <div class="meta">${novo ? '<span class="tag novo">Novo</span> ' : ''}${esc(formatarData(a.criado_em))} · ${PUBLICOS[a.publico] || ''}
-        ${apagar ? `<button class="link perigo" data-apagar-aviso="${a.id}">apagar</button>` : ''}</div>
+        ${gestor ? `<button class="link perigo" data-apagar-aviso="${a.id}">apagar</button>` : ''}</div>
       <h3>${esc(a.titulo)}</h3>
       <div class="mensagem">${esc(a.texto)}</div>
+      ${gestor ? listaCientes(a) : rodapeCiente(a)}
     </article>`;
 }
 
@@ -472,7 +476,7 @@ async function telaPainel() {
   const u = await exigirUsuario();
   if (!u) return;
   const [{ turmas }, avisos] = await Promise.all([api('/api/turmas'), estado.avisos]);
-  const novos = avisos.filter((a) => a.id > ultimoLido());
+  const novos = avisos.filter((a) => !a.ciente_em);
   app.innerHTML = `
     <div class="cabecalho">
       <div>
@@ -1459,12 +1463,30 @@ async function telaAvisos() {
   const u = await exigirUsuario();
   if (!u) return;
   const avisos = await estado.avisos;
-  const lido = ultimoLido();
+  const pendentes = avisos.filter((a) => !a.ciente_em).length;
   app.innerHTML = `
     <h1>Avisos</h1>
-    <p class="sub">Comunicados enviados pela coordenação.</p>
-    ${avisos.map((a) => cartaoAviso(a, { novo: a.id > lido })).join('') || '<div class="vazio">Nenhum aviso por enquanto.</div>'}`;
-  marcarLidos(avisos);
+    <p class="sub">Comunicados enviados pela coordenação.${pendentes ? ' Depois de ler, clique em <strong>Ciente</strong> para confirmar.' : ''}</p>
+    ${avisos.map((a) => cartaoAviso(a)).join('') || '<div class="vazio">Nenhum aviso por enquanto.</div>'}`;
+  mostrarNaoLidos(avisos);
+  app.onclick = async (ev) => {
+    const b = ev.target.closest('[data-ciente]');
+    if (!b || b.disabled) return;
+    b.disabled = true;
+    try {
+      const { ciente_em } = await api(`/api/avisos/${b.dataset.ciente}/ciente`, { method: 'POST' });
+      const a = avisos.find((x) => String(x.id) === b.dataset.ciente);
+      a.ciente_em = ciente_em;
+      const cartao = b.closest('.aviso-item');
+      cartao.classList.remove('novo');
+      cartao.querySelector('.tag.novo')?.remove();
+      b.outerHTML = rodapeCiente(a);
+      mostrarNaoLidos(avisos);
+    } catch (err) {
+      b.disabled = false;
+      avisar(err.message);
+    }
+  };
 }
 
 async function telaAdminAvisos() {
@@ -1478,7 +1500,7 @@ async function telaAdminAvisos() {
   topoDoAdmin();
   app.innerHTML = `
     <h1>Avisos</h1>
-    <p class="sub">Os avisos aparecem para os usuários na tela inicial do painel e no menu Avisos.</p>
+    <p class="sub">Os avisos aparecem para os usuários na tela inicial do painel e no menu Avisos. A notificação só some depois que a pessoa clica em Ciente; abra a contagem em cada aviso para ver quem já deu ciente e quando.</p>
     <form id="f" class="cartao">
       <h2 style="margin-top:0">Novo aviso</h2>
       <label for="titulo">Título</label>
@@ -1496,7 +1518,7 @@ async function telaAdminAvisos() {
       <div class="linha-botoes"><button type="submit">Enviar aviso</button></div>
     </form>
     <h2>Avisos enviados <span class="meta">(${avisos.length})</span></h2>
-    ${avisos.map((a) => cartaoAviso(a, { apagar: true })).join('') || '<div class="vazio">Nenhum aviso enviado ainda.</div>'}`;
+    ${avisos.map((a) => cartaoAviso(a, { gestor: true })).join('') || '<div class="vazio">Nenhum aviso enviado ainda.</div>'}`;
 
   const f = document.getElementById('f');
   contador(f.texto);
