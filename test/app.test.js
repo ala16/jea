@@ -7,7 +7,10 @@ const fs = require('fs');
 const path = require('path');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jea-'));
-process.env.DB_PATH = ':memory:';
+process.env.PGLITE_DIR = 'memory://';
+delete process.env.DATABASE_URL;
+delete process.env.POSTGRES_URL;
+delete process.env.BLOB_READ_WRITE_TOKEN;
 process.env.UPLOAD_DIR = tmp;
 process.env.ADMIN_PASSWORD = 'segredo';
 
@@ -49,6 +52,14 @@ test('valida CPF', () => {
   assert.ok(!cpfValido('11111111111'));
 });
 
+async function subir(c, conteudo, tipo, nome) {
+  const fd = new FormData();
+  fd.set('arquivo', new Blob([Buffer.from(conteudo)], { type: tipo }), nome);
+  const r = await c('/api/upload', { form: fd });
+  assert.equal(r.status, 200);
+  return r.body;
+}
+
 test('fluxo do especialista, instrutor e feedback em massa', async () => {
   const a = cliente();
   assert.equal((await a('/api/entrar', { json: { cpf: '123' } })).status, 400);
@@ -58,13 +69,11 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
 
   assert.equal((await a('/api/turmas')).status, 403);
 
-  const cad = new FormData();
-  cad.set('nome', 'Maria da Silva');
-  cad.set('tipo', 'especialista');
-  cad.set('foto', new Blob([Buffer.from('fakepng')], { type: 'image/png' }), 'eu.png');
-  r = await a('/api/cadastro', { form: cad });
+  const foto = await subir(a, 'fakepng', 'image/png', 'eu.png');
+  r = await a('/api/cadastro', { json: { nome: 'Maria da Silva', tipo: 'especialista', foto } });
   assert.equal(r.status, 200);
   assert.equal(r.body.usuario.tipo, 'especialista');
+  assert.equal((await a(foto.url)).status, 200);
 
   r = await a('/api/entrar', { json: { cpf: CPF_A } });
   assert.equal(r.body.primeiroAcesso, false);
@@ -72,46 +81,44 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
   r = await a('/api/turmas', { json: { numero: '12', cidade: 'Goiânia', sindicato: 'SR Goiânia', periodo: 'sáb 8h-12h' } });
   const turmaId = r.body.turma.id;
 
-  const m1 = new FormData();
-  m1.set('titulo', 'teste');
-  m1.set('missao', 'teste');
-  m1.set('expedicao_local', 'Fazenda X');
-  m1.set('anexo', new Blob([Buffer.from('img')], { type: 'image/jpeg' }), 'exp.jpg');
-  r = await a(`/api/turmas/${turmaId}/modulos/1`, { form: m1 });
+  // Módulo 1 do especialista: só aceita imagem
+  const pdfA = await subir(a, '%PDF', 'application/pdf', 'doc.pdf');
+  r = await a(`/api/turmas/${turmaId}/modulos/1`, { json: { titulo: 'x', anexo: pdfA } });
+  assert.equal(r.status, 400);
+
+  const exp = await subir(a, 'img', 'image/jpeg', 'exp.jpg');
+  r = await a(`/api/turmas/${turmaId}/modulos/1`, {
+    json: { titulo: 'teste', missao: 'teste', expedicao_local: 'Fazenda X', anexo: exp },
+  });
   assert.equal(r.status, 200);
   assert.equal(r.body.modulo.dados.titulo, 'teste');
   assert.equal(r.body.modulo.dados.expedicao_local, 'Fazenda X');
   const anexo = r.body.modulo.anexo;
-  assert.ok(anexo);
+  assert.equal(anexo, exp.url);
 
-  const m2 = new FormData();
-  m2.set('texto', 'relato do módulo 2');
-  m2.set('anexo', new Blob([Buffer.from('%PDF')], { type: 'application/pdf' }), 'doc.pdf');
-  assert.equal((await a(`/api/turmas/${turmaId}/modulos/2`, { form: m2 })).status, 200);
-  assert.equal((await a(`/api/turmas/${turmaId}/modulos/9`, { form: new FormData() })).status, 404);
+  // Salvar de novo sem arquivo mantém o anexo
+  r = await a(`/api/turmas/${turmaId}/modulos/1`, { json: { titulo: 'teste 2' } });
+  assert.equal(r.body.modulo.anexo, anexo);
+
+  assert.equal((await a(`/api/turmas/${turmaId}/modulos/2`, { json: { texto: 'relato', anexo: pdfA } })).status, 200);
+  assert.equal((await a(`/api/turmas/${turmaId}/modulos/9`, { json: {} })).status, 404);
+  assert.equal((await a(`/api/turmas/${turmaId}/modulos/3`, { json: { anexo: { url: 'https://evil.example/x.png' } } })).status, 400);
 
   // Instrutor: só imagem
   const b = cliente();
   await b('/api/entrar', { json: { cpf: CPF_B } });
-  const cadB = new FormData();
-  cadB.set('nome', 'João Souza');
-  cadB.set('tipo', 'instrutor');
-  await b('/api/cadastro', { form: cadB });
+  await b('/api/cadastro', { json: { nome: 'João Souza', tipo: 'instrutor' } });
   r = await b('/api/turmas', { json: { numero: '7', cidade: 'Rio Verde', sindicato: 'SR Rio Verde', periodo: 'noite' } });
   const turmaB = r.body.turma.id;
-  const pdf = new FormData();
-  pdf.set('texto', 'x');
-  pdf.set('anexo', new Blob([Buffer.from('%PDF')], { type: 'application/pdf' }), 'doc.pdf');
-  assert.equal((await b(`/api/turmas/${turmaB}/modulos/3`, { form: pdf })).status, 400);
-  const img = new FormData();
-  img.set('texto', 'aula 3');
-  img.set('anexo', new Blob([Buffer.from('img')], { type: 'image/png' }), 'a.png');
-  assert.equal((await b(`/api/turmas/${turmaB}/modulos/3`, { form: img })).status, 200);
+  const pdfB = await subir(b, '%PDF', 'application/pdf', 'doc.pdf');
+  assert.equal((await b(`/api/turmas/${turmaB}/modulos/3`, { json: { texto: 'x', anexo: pdfB } })).status, 400);
+  const img = await subir(b, 'img', 'image/png', 'a.png');
+  assert.equal((await b(`/api/turmas/${turmaB}/modulos/3`, { json: { texto: 'aula 3', anexo: img } })).status, 200);
 
   // Isolamento entre usuários
   assert.equal((await b(`/api/turmas/${turmaId}`)).status, 404);
-  assert.equal((await b(`/arquivos/${anexo}`)).status, 403);
-  assert.equal((await a(`/arquivos/${anexo}`)).status, 200);
+  assert.equal((await b(anexo)).status, 403);
+  assert.equal((await a(anexo)).status, 200);
 
   // Admin
   const adm = cliente();
@@ -121,7 +128,7 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
   r = await adm('/api/admin/envios');
   assert.equal(r.body.envios.length, 3);
   assert.equal(r.body.usuarios.length, 2);
-  assert.equal((await adm(`/arquivos/${anexo}`)).status, 200);
+  assert.equal((await adm(anexo)).status, 200);
 
   const ids = r.body.envios.map((e) => e.id);
   r = await adm('/api/admin/feedback', { json: { ids, feedback: 'Muito bom!' } });

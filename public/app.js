@@ -60,7 +60,7 @@ function contador(textarea) {
 
 function formatarData(s) {
   if (!s) return '';
-  const d = new Date(s.replace(' ', 'T') + 'Z');
+  const d = new Date(s);
   return d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
@@ -70,9 +70,37 @@ function ehImagem(nome) {
 
 function blocoAnexo(arquivo, nomeOriginal) {
   if (!arquivo) return '';
-  const url = `/arquivos/${encodeURIComponent(arquivo)}`;
-  return `<div class="anexo-atual">Arquivo atual: <a href="${url}" target="_blank">${esc(nomeOriginal || arquivo)}</a>
+  const url = esc(arquivo);
+  return `<div class="anexo-atual">Arquivo atual: <a href="${url}" target="_blank" rel="noopener">${esc(nomeOriginal || arquivo)}</a>
     ${ehImagem(arquivo) ? `<img src="${url}" alt="">` : ''}</div>`;
+}
+
+// ---------- upload ----------
+
+let config;
+function obterConfig() {
+  return (config ??= api('/api/config'));
+}
+
+// Envia o arquivo e devolve { url, nome }. Na Vercel vai direto para o Vercel Blob.
+async function enviarArquivo(arquivo, imagem) {
+  if (arquivo.size > 5 * 1024 * 1024) throw new Error('Arquivo maior que 5MB.');
+  if (imagem && !arquivo.type.startsWith('image/')) throw new Error('O arquivo precisa ser uma imagem.');
+  const { uploadDireto } = await obterConfig();
+  if (!uploadDireto) {
+    const fd = new FormData();
+    fd.set('arquivo', arquivo);
+    return api('/api/upload', { method: 'POST', form: fd });
+  }
+  let nome = arquivo.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w.-]+/g, '_');
+  if (!/\.\w+$/.test(nome) && arquivo.type.startsWith('image/')) nome += '.' + arquivo.type.split('/')[1];
+  const { upload } = await import('/vendor/blob-client.js');
+  const blob = await upload(`jea/${nome}`, arquivo, {
+    access: 'public',
+    handleUploadUrl: '/api/blob',
+    clientPayload: imagem ? 'imagem' : '',
+  });
+  return { url: blob.url, nome: arquivo.name };
 }
 
 // ---------- sessão ----------
@@ -97,7 +125,7 @@ function desenharTopo(conteudo) {
 }
 
 function topoDoUsuario(u) {
-  const foto = u.foto ? `<img class="avatar" src="/arquivos/${encodeURIComponent(u.foto)}" alt="">` : '<span class="avatar"></span>';
+  const foto = u.foto ? `<img class="avatar" src="${esc(u.foto)}" alt="">` : '<span class="avatar"></span>';
   desenharTopo(`<div class="usuario">${foto}<span>${esc(u.nome)} · ${u.tipo === 'especialista' ? 'Especialista' : 'Instrutor'}</span><button data-sair>Sair</button></div>`);
 }
 
@@ -162,7 +190,14 @@ async function telaCadastro() {
     const botao = f.querySelector('button[type=submit]');
     botao.disabled = true;
     try {
-      await api('/api/cadastro', { method: 'POST', form: new FormData(f) });
+      const foto = f.foto.files[0];
+      await api('/api/cadastro', {
+        json: {
+          nome: f.nome.value,
+          tipo: f.tipo.value,
+          foto: foto ? await enviarArquivo(foto, true) : null,
+        },
+      });
       ir('#/painel');
     } catch (err) {
       document.getElementById('erro').textContent = err.message;
@@ -321,20 +356,24 @@ async function telaTurma(turmaId, numero) {
   });
   f.onsubmit = async (e) => {
     e.preventDefault();
-    const arquivo = f.anexo?.files?.[0];
-    if (arquivo && arquivo.size > 5 * 1024 * 1024) {
-      document.getElementById('erro').textContent = 'Arquivo maior que 5MB.';
-      return;
-    }
     const botao = f.querySelector('button[type=submit]');
     botao.disabled = true;
     try {
-      await api(`/api/turmas/${turma.id}/modulos/${numero}`, { method: 'POST', form: new FormData(f) });
+      const corpo = {};
+      for (const el of f.querySelectorAll('input[type=text], textarea')) corpo[el.name] = el.value;
+      corpo.removerAnexo = Boolean(f.removerAnexo?.checked);
+      const arquivo = f.anexo.files[0];
+      if (arquivo) {
+        botao.textContent = 'Enviando arquivo...';
+        corpo.anexo = await enviarArquivo(arquivo, instrutor || especial);
+      }
+      await api(`/api/turmas/${turma.id}/modulos/${numero}`, { json: corpo });
       avisar(`Módulo ${numero} salvo.`);
       telaTurma(turma.id, numero);
     } catch (err) {
       document.getElementById('erro').textContent = err.message;
       botao.disabled = false;
+      botao.textContent = m ? 'Salvar alterações' : 'Enviar módulo';
     }
   };
 }
