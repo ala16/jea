@@ -18,6 +18,16 @@ A Vercel faz o deploy direto do GitHub a cada push na `main`. O projeto já vem 
 
 Fotos e anexos (até 5MB) vão do navegador direto para o Vercel Blob, porque as funções da Vercel só aceitam requisições de até 4,5MB. Os links dos arquivos têm um sufixo aleatório e não são listados em lugar nenhum, mas quem tiver o link consegue abrir.
 
+## Capacidade (até 500 inscritos)
+
+O sistema está ajustado para 500 pessoas usando ao mesmo tempo (cadastro, módulos, fórum, mensagens e imagens):
+
+- **Banco**: a conexão usa o pooler da Neon (endereço `-pooler`, aceito automaticamente), que suporta milhares de conexões simultâneas. As tabelas só são alteradas quando o esquema muda, e há índices para perfis, fórum, mensagens e o painel do gestor.
+- **Imagens**: o navegador reduz as fotos antes de enviar (até 1600px; foto de perfil até 400px), deixando cada uma com algumas centenas de KB. Com 500 pessoas e 8 módulos, o Blob fica na faixa de 1 a 2GB. As imagens carregam só quando aparecem na tela.
+- **Painel do gestor**: a lista de envios vem sem os textos, que são buscados ao clicar em "ver envio", para não passar do limite de 4,5MB por resposta da Vercel.
+
+Planos: no gratuito (Hobby) da Vercel o Blob tem 1GB e a Neon gratuita tem 0,5GB de banco. Para 500 inscritos com imagens, vale o plano Pro da Vercel (ou um plano pago do Blob) e o Launch da Neon.
+
 ## Rodar localmente
 
 Requer Node.js 20 ou superior. Sem `DATABASE_URL` o sistema usa um Postgres embutido (PGlite) em `data/pglite`, e sem `BLOB_READ_WRITE_TOKEN` guarda os arquivos em `data/uploads`.

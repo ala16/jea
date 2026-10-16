@@ -142,6 +142,14 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
   assert.equal(maria.sem_feedback, 2);
   assert.equal((await adm(anexo)).status, 200);
 
+  // A lista do gestor vem sem os textos; cada envio é aberto à parte.
+  assert.ok(r.body.envios.every((e) => !('texto' in e) && !('dados' in e)));
+  const detalhe = await adm(`/api/admin/envios/${r.body.envios[0].id}`);
+  assert.equal(detalhe.status, 200);
+  assert.ok('texto' in detalhe.body.envio && detalhe.body.envio.nome);
+  assert.equal((await adm('/api/admin/envios/999999')).status, 404);
+  assert.equal((await a(`/api/admin/envios/${r.body.envios[0].id}`)).status, 401);
+
   const ids = r.body.envios.map((e) => e.id);
   r = await adm('/api/admin/feedback', { json: { ids, feedback: 'Muito bom!' } });
   assert.equal(r.body.atualizados, 3);
