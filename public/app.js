@@ -173,7 +173,7 @@ async function telaCadastro() {
       <form id="f">
         <label for="nome">Nome completo</label>
         <input id="nome" name="nome" type="text" maxlength="200" required>
-        <label for="foto">Foto <span class="ajuda">(opcional, até 5MB)</span></label>
+        <label for="foto">Foto do perfil <span class="ajuda">(opcional, até 5MB)</span></label>
         <input id="foto" name="foto" type="file" accept="image/*">
         <label>Você é</label>
         <div class="opcoes">
