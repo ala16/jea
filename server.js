@@ -118,6 +118,14 @@ function lerArquivo(v, { imagem } = {}) {
   return { url, nome: texto(v.nome || path.basename(url), 200) };
 }
 
+// Vários arquivos num mesmo campo: aceita a lista nova (plural) e o formato antigo de um arquivo só.
+const MAX_ARQUIVOS = 30;
+function lerArquivos(lista, um, opcoes) {
+  const itens = [].concat(Array.isArray(lista) ? lista : [], um || []);
+  if (itens.length > MAX_ARQUIVOS) throw Object.assign(new Error(`Envie no máximo ${MAX_ARQUIVOS} arquivos por vez.`), { status: 400 });
+  return itens.map((v) => lerArquivo(v, opcoes)).filter(Boolean);
+}
+
 // ---------- app ----------
 
 const app = express();
@@ -335,7 +343,7 @@ app.post('/api/turmas/:turmaId/modulos/:numero', exigirUsuario, carregarTurma, a
   const modulo1Especialista = !instrutor && numero === 1;
 
   // Instrutor envia imagem; a foto da expedição também é imagem.
-  const novo = lerArquivo(req.body.anexo, { imagem: instrutor || modulo1Especialista });
+  const novos = lerArquivos(req.body.anexos, req.body.anexo, { imagem: instrutor || modulo1Especialista });
 
   let dados = null;
   let textoModulo = null;
@@ -346,16 +354,15 @@ app.post('/api/turmas/:turmaId/modulos/:numero', exigirUsuario, carregarTurma, a
     textoModulo = texto(req.body.texto);
   }
 
-  const anterior = await db.modulo(req.turma.id, numero);
-  let anexo = anterior?.anexo || null;
-  let anexoNome = anterior?.anexo_nome || null;
-  if (novo || req.body.removerAnexo) {
-    if (anexo && anexo !== novo?.url) await arquivos.remover(anexo);
-    anexo = novo?.url || null;
-    anexoNome = novo?.nome || null;
-  }
+  // Mantém os anexos anteriores, menos os marcados para remover (removerAnexo antigo remove todos).
+  const anterior = (await db.modulo(req.turma.id, numero))?.anexos || [];
+  const remover = new Set(Array.isArray(req.body.removerAnexos) ? req.body.removerAnexos.map(String) : []);
+  const fica = (a) => !req.body.removerAnexo && !remover.has(a.url);
+  const anexos = [...anterior.filter(fica), ...novos.filter((n) => !anterior.some((a) => a.url === n.url))];
+  if (anexos.length > MAX_ARQUIVOS) return res.status(400).json({ erro: `Cada módulo aceita até ${MAX_ARQUIVOS} arquivos.` });
 
-  const modulo = await db.salvarModulo(req.turma.id, numero, { dados, texto: textoModulo, anexo, anexoNome });
+  const modulo = await db.salvarModulo(req.turma.id, numero, { dados, texto: textoModulo, anexos });
+  await Promise.all(anterior.filter((a) => !fica(a)).map((a) => arquivos.remover(a.url)));
   res.json({ modulo });
 });
 
@@ -386,10 +393,10 @@ app.post('/api/forum/:forum', exigirUsuario, async (req, res) => {
   if (!FORUNS.includes(forum)) return res.status(404).json({ erro: 'Fórum não encontrado.' });
   const titulo = texto(req.body.titulo, 200).trim();
   const corpo = texto(req.body.texto).trim();
-  const imagem = lerArquivo(req.body.imagem, { imagem: true });
-  if (!titulo || (!corpo && !imagem)) return res.status(400).json({ erro: 'Escreva o título e a mensagem.' });
+  const imagens = lerArquivos(req.body.imagens, req.body.imagem, { imagem: true }).map((a) => a.url);
+  if (!titulo || (!corpo && !imagens.length)) return res.status(400).json({ erro: 'Escreva o título e a mensagem.' });
   res.json({
-    topico: await db.criarTopico({ forum, usuarioId: req.usuario.id, titulo, texto: corpo, imagem: imagem?.url || null }),
+    topico: await db.criarTopico({ forum, usuarioId: req.usuario.id, titulo, texto: corpo, imagens }),
   });
 });
 
@@ -412,10 +419,10 @@ app.get('/api/forum/topico/:id', exigirLeitorForum, carregarTopico, async (req, 
 
 app.post('/api/forum/topico/:id/respostas', exigirUsuario, carregarTopico, async (req, res) => {
   const corpo = texto(req.body.texto).trim();
-  const imagem = lerArquivo(req.body.imagem, { imagem: true });
-  if (!corpo && !imagem) return res.status(400).json({ erro: 'Escreva a resposta ou envie uma imagem.' });
+  const imagens = lerArquivos(req.body.imagens, req.body.imagem, { imagem: true }).map((a) => a.url);
+  if (!corpo && !imagens.length) return res.status(400).json({ erro: 'Escreva a resposta ou envie uma imagem.' });
   res.json({
-    resposta: await db.responder({ topicoId: req.topico.id, usuarioId: req.usuario.id, texto: corpo, imagem: imagem?.url || null }),
+    resposta: await db.responder({ topicoId: req.topico.id, usuarioId: req.usuario.id, texto: corpo, imagens }),
   });
 });
 

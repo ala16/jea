@@ -8,7 +8,6 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 
-const MAX_BYTES = 5 * 1024 * 1024;
 const usaBlob = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, 'data', 'uploads');
 const EXT_IMAGEM = /\.(png|jpe?g|gif|webp|bmp|heic|heif|avif)$/i;
@@ -46,7 +45,6 @@ async function gerarTokenBlob(req) {
     request: req,
     onBeforeGenerateToken: async (pathname, clientPayload) => ({
       allowedContentTypes: clientPayload === 'imagem' || EXT_IMAGEM.test(pathname) ? ['image/*'] : undefined,
-      maximumSizeInBytes: MAX_BYTES,
       addRandomSuffix: true,
     }),
   });
@@ -67,7 +65,6 @@ function uploadLocal(req, res, next) {
           cb(null, `${Date.now()}-${crypto.randomBytes(6).toString('hex')}${ext}`);
         },
       }),
-      limits: { fileSize: MAX_BYTES },
     }).single('arquivo');
   }
   multerLocal(req, res, (err) => {

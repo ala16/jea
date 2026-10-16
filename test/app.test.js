@@ -102,12 +102,22 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
   assert.equal(r.status, 200);
   assert.equal(r.body.modulo.dados.titulo, 'teste');
   assert.equal(r.body.modulo.dados.expedicao_local, 'Fazenda X');
-  const anexo = r.body.modulo.anexo;
+  const anexo = r.body.modulo.anexos[0].url;
   assert.equal(anexo, exp.url);
 
   // Salvar de novo sem arquivo mantém o anexo
   r = await a(`/api/turmas/${turmaId}/modulos/1`, { json: { titulo: 'teste 2' } });
-  assert.equal(r.body.modulo.anexo, anexo);
+  assert.deepEqual(r.body.modulo.anexos.map((x) => x.url), [anexo]);
+
+  // Vários anexos de uma vez; os novos somam aos que já estavam e cada um pode ser removido
+  const exp2 = await subir(a, 'img', 'image/jpeg', 'exp2.jpg');
+  const exp3 = await subir(a, 'img', 'image/jpeg', 'exp3.jpg');
+  r = await a(`/api/turmas/${turmaId}/modulos/1`, { json: { titulo: 'teste 3', anexos: [exp2, exp3] } });
+  assert.deepEqual(r.body.modulo.anexos.map((x) => x.nome), ['exp.jpg', 'exp2.jpg', 'exp3.jpg']);
+  r = await a(`/api/turmas/${turmaId}/modulos/1`, { json: { titulo: 'teste 3', removerAnexos: [exp2.url] } });
+  assert.deepEqual(r.body.modulo.anexos.map((x) => x.url), [anexo, exp3.url]);
+  assert.equal((await a(exp2.url)).status, 404);
+  assert.equal((await a(exp3.url)).status, 200);
 
   assert.equal((await a(`/api/turmas/${turmaId}/modulos/2`, { json: { texto: 'relato', anexo: pdfA } })).status, 200);
   assert.equal((await a(`/api/turmas/${turmaId}/modulos/9`, { json: {} })).status, 404);
@@ -193,8 +203,10 @@ test('fórum: todos leem e publicam nos três fóruns', async () => {
   const img = await subir(ins, 'img', 'image/png', 'quadro.png');
   const pdf = await subir(ins, '%PDF', 'application/pdf', 'doc.pdf');
   assert.equal((await ins(`/api/forum/topico/${topicoEsp}/respostas`, { json: { texto: '', imagem: pdf } })).status, 400);
-  r = await ins(`/api/forum/topico/${topicoEsp}/respostas`, { json: { texto: '', imagem: img } });
+  const img2 = await subir(ins, 'img', 'image/png', 'quadro2.png');
+  r = await ins(`/api/forum/topico/${topicoEsp}/respostas`, { json: { texto: '', imagens: [img.url, img2.url].map((url) => ({ url })) } });
   assert.equal(r.status, 200);
+  assert.equal((await esp(img2.url)).status, 200);
   const respImg = r.body.resposta.id;
   assert.equal((await esp(img.url)).status, 200);
   assert.equal((await cliente()(img.url)).status, 403);
