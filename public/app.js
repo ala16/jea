@@ -236,7 +236,7 @@ async function telaPainel() {
         <div class="grade">
           <div><label for="cidade">Cidade</label><input id="cidade" name="cidade" type="text" maxlength="200" required></div>
           <div><label for="sindicato">Sindicato rural</label><input id="sindicato" name="sindicato" type="text" maxlength="200" required></div>
-          <div><label for="horario">Horário</label><input id="horario" name="horario" type="text" maxlength="200" placeholder="Ex: sábados, 8h às 12h" required></div>
+          <div><label for="horario">Horário</label><input id="horario" name="horario" type="text" maxlength="200" placeholder="Ex: 8h às 12h" required></div>
         </div>
         <div class="erro" id="erro"></div>
         <div class="linha-botoes"><button type="submit">Cadastrar turma</button></div>
