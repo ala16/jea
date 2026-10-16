@@ -268,7 +268,10 @@ module.exports = {
 
   todosUsuarios: () =>
     todos(
-      `SELECT u.*, (SELECT COUNT(*)::int FROM turmas t WHERE t.usuario_id = u.id) AS turmas
+      `SELECT u.*, (SELECT COUNT(*)::int FROM turmas t WHERE t.usuario_id = u.id) AS turmas,
+              (SELECT COUNT(*)::int FROM modulos m JOIN turmas t ON t.id = m.turma_id WHERE t.usuario_id = u.id) AS envios,
+              (SELECT COUNT(*)::int FROM modulos m JOIN turmas t ON t.id = m.turma_id
+                WHERE t.usuario_id = u.id AND m.feedback IS NULL) AS sem_feedback
          FROM usuarios u ORDER BY u.nome`
     ),
 

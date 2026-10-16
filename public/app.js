@@ -786,8 +786,10 @@ async function telaAdmin() {
     <h2>Cadastrados</h2>
     <p class="ajuda">Clique no nome para abrir a ficha da pessoa, com todos os envios.</p>
     <div class="tabela"><table>
-      <thead><tr><th>Nome</th><th>CPF</th><th>Perfil</th><th>Turmas</th><th>Cadastro</th></tr></thead>
-      <tbody>${usuarios.map((u) => `<tr><td><a href="#/admin/usuario/${u.id}"><strong>${esc(u.nome)}</strong></a></td><td>${esc(mascaraCpf(u.cpf))}</td><td>${esc(u.tipo)}</td><td>${u.turmas}</td><td>${esc(formatarData(u.criado_em))}</td></tr>`).join('') || '<tr><td colspan="5" class="meta">Ninguém cadastrado ainda.</td></tr>'}</tbody>
+      <thead><tr><th>Nome</th><th>CPF</th><th>Perfil</th><th>Turmas</th><th>Envios</th><th>Cadastro</th></tr></thead>
+      <tbody>${usuarios.map((u) => `<tr><td><a href="#/admin/usuario/${u.id}"><strong>${esc(u.nome)}</strong></a></td><td>${esc(mascaraCpf(u.cpf))}</td><td>${nomeTipo(u.tipo)}</td><td>${u.turmas}</td>
+        <td><strong>${u.envios}</strong> de ${u.turmas * 8}${u.sem_feedback ? `<div class="meta"><span class="tag novo">${u.sem_feedback} sem feedback</span></div>` : ''}</td>
+        <td>${esc(formatarData(u.criado_em))}</td></tr>`).join('') || '<tr><td colspan="6" class="meta">Ninguém cadastrado ainda.</td></tr>'}</tbody>
     </table></div>`;
 
   const corpo = document.getElementById('corpo');
