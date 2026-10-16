@@ -225,3 +225,37 @@ test('avisos: admin publica, cada perfil vê os seus', async () => {
   assert.equal((await adm(`/api/admin/avisos/${soInstrutor}`, { method: 'DELETE' })).status, 404);
   assert.equal((await ins('/api/avisos')).body.avisos.length, 1);
 });
+
+test('perfil: editar nome, foto e redes; outros veem', async () => {
+  const a = cliente();
+  await a('/api/entrar', { json: { cpf: '286.255.878-87' } });
+  await a('/api/cadastro', { json: { nome: 'Eva Perfil', tipo: 'instrutor' } });
+  const foto = await subir(a, 'img', 'image/png', 'eu.png');
+  let r = await a('/api/perfil', {
+    json: { nome: 'Eva Perfil Souza', foto, redes: { instagram: 'instagram.com/eva', site: '', linkedin: 'javascript:alert(1)' } },
+  });
+  assert.equal(r.status, 400);
+  r = await a('/api/perfil', { json: { nome: 'Eva Perfil Souza', foto, redes: { instagram: 'instagram.com/eva', facebook: 'https://facebook.com/eva' } } });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.usuario.nome, 'Eva Perfil Souza');
+  assert.deepEqual(r.body.usuario.redes, { instagram: 'https://instagram.com/eva', facebook: 'https://facebook.com/eva' });
+  const id = r.body.usuario.id;
+
+  const b = cliente();
+  await b('/api/entrar', { json: { cpf: '529.982.247-25' } });
+  r = await b(`/api/perfil/${id}`);
+  assert.equal(r.status, 200);
+  assert.equal(r.body.perfil.redes.instagram, 'https://instagram.com/eva');
+  assert.equal(r.body.perfil.cpf, undefined);
+  assert.equal((await b(foto.url)).status, 200);
+  assert.equal((await cliente()(`/api/perfil/${id}`)).status, 401);
+
+  // Trocar a foto apaga a antiga; remover deixa sem foto
+  const nova = await subir(a, 'img2', 'image/png', 'nova.png');
+  r = await a('/api/perfil', { json: { nome: 'Eva Perfil Souza', foto: nova } });
+  assert.equal(r.body.usuario.foto, nova.url);
+  assert.equal((await a(foto.url)).status, 404);
+  r = await a('/api/perfil', { json: { nome: 'Eva Perfil Souza', removerFoto: true } });
+  assert.equal(r.body.usuario.foto, null);
+  assert.equal(r.body.usuario.tipo, 'instrutor');
+});

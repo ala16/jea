@@ -73,6 +73,9 @@ const SCHEMA = `
     publico TEXT NOT NULL DEFAULT 'todos' CHECK (publico IN ('todos', 'especialista', 'instrutor')),
     criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
   );
+
+  -- Links de redes sociais do perfil: { instagram, facebook, linkedin, youtube, site }.
+  ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS redes JSONB;
 `;
 
 let pronto;
@@ -115,6 +118,15 @@ module.exports = {
 
   criarUsuario: ({ cpf, nome, tipo, foto }) =>
     um('INSERT INTO usuarios (cpf, nome, tipo, foto) VALUES ($1, $2, $3, $4) RETURNING *', [cpf, nome, tipo, foto]),
+
+  atualizarPerfil: (id, { nome, foto, redes }) =>
+    um('UPDATE usuarios SET nome = $2, foto = $3, redes = $4 WHERE id = $1 RETURNING *', [id, nome, foto, JSON.stringify(redes)]),
+
+  perfil: (id) => um('SELECT id, nome, tipo, foto, redes FROM usuarios WHERE id = $1', [id]),
+
+  async fotoDePerfil(url) {
+    return Boolean(await um('SELECT 1 FROM usuarios WHERE foto = $1', [url]));
+  },
 
   turmasDoUsuario: (usuarioId) =>
     todos(
