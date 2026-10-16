@@ -55,7 +55,7 @@ ADMIN_PASSWORD=sua-senha npm start
 - **Avisos**: o admin escreve avisos para todos, só especialistas ou só instrutores. Eles aparecem no painel de quem entra e no menu Avisos, com a contagem dos não lidos.
 - **Material**: o admin publica links (Google Drive, cartilhas, vídeos) nas categorias Geral, Especialista e Instrutor. Todos os cadastrados veem as três.
 - **Perguntas**: cada pessoa envia dúvidas ao admin e vê só as suas; o admin vê todas, responde e o menu mostra quantas aguardam resposta.
-- **Admin** (link "Acesso do gestor" na tela inicial): envios à esquerda e a caixa de feedback à direita. Clicar no nome abre a ficha da pessoa, com perfil, turmas e todos os envios, e dá para mandar feedback ali mesmo. O painel lista todos os envios com filtros por perfil, módulo, feedback e busca; seleciona vários e envia o mesmo feedback para todos. O feedback aparece para o usuário no módulo.
+- **Admin** (link "Acesso do gestor" na tela inicial): uma linha por envio, cada um com a sua caixa de feedback ao lado. A tabela de cadastrados mostra quantos envios cada pessoa fez. Clicar no nome abre a ficha da pessoa, com perfil, turmas e todos os envios, cada um com a sua caixa de feedback. O painel lista todos os envios com filtros por perfil, módulo, feedback e busca; seleciona vários e envia o mesmo feedback para todos. O feedback aparece para o usuário no módulo.
 
 ## Testes
 

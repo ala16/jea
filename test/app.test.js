@@ -128,6 +128,9 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
   r = await adm('/api/admin/envios');
   assert.equal(r.body.envios.length, 3);
   assert.equal(r.body.usuarios.length, 2);
+  const maria = r.body.usuarios.find((u) => u.nome === 'Maria da Silva');
+  assert.equal(maria.envios, 2);
+  assert.equal(maria.sem_feedback, 2);
   assert.equal((await adm(anexo)).status, 200);
 
   const ids = r.body.envios.map((e) => e.id);

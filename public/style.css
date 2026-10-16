@@ -321,3 +321,20 @@ main.largo { max-width: 1280px; }
   .menu .badge { left: auto; right: 6px; top: 4px; }
 }
 .botao.whatsapp { background: #25d366; border-color: #25d366; color: #fff; }
+
+/* ---------- feedback: uma caixa por envio ---------- */
+.tabela-envios td { vertical-align: top; }
+.tabela-envios .col-fb { width: 42%; min-width: 300px; }
+.tabela-envios tr.sem-fb > td:first-child { box-shadow: inset 4px 0 0 #f5b700; }
+.fb textarea { min-height: 70px; font-size: 14px; padding: 8px 10px; }
+.fb.com textarea { background: var(--verde-claro); border-color: #bfdcc8; }
+.fb-rodape { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 6px; }
+.fb-rodape button { padding: 6px 16px; font-size: 14px; }
+.fb-estado { font-size: 13px; color: #9a6700; font-weight: 600; }
+.fb.com .fb-estado { color: var(--verde); }
+.envio { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; align-items: start; }
+.envio .fb textarea { min-height: 140px; }
+@media (max-width: 900px) {
+  .envio { grid-template-columns: 1fr; }
+  .tabela-envios .col-fb { min-width: 260px; }
+}
