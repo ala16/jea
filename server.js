@@ -451,6 +451,15 @@ app.get('/api/admin/envios', exigirAdmin, async (req, res) => {
   res.json({ envios, usuarios });
 });
 
+// Ficha de uma pessoa: perfil, turmas e todos os envios.
+app.get('/api/admin/usuarios/:id', exigirAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  const usuario = Number.isInteger(id) ? await db.usuarioPorId(id) : null;
+  if (!usuario) return res.status(404).json({ erro: 'Pessoa não encontrada.' });
+  const [turmas, envios] = await Promise.all([db.turmasDoUsuario(id), db.todosEnvios(id)]);
+  res.json({ usuario, turmas, envios });
+});
+
 app.post('/api/admin/feedback', exigirAdmin, async (req, res) => {
   const ids = Array.isArray(req.body.ids) ? req.body.ids.map(Number).filter(Number.isInteger) : [];
   const feedback = texto(req.body.feedback).trim();

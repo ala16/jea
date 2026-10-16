@@ -572,6 +572,128 @@ function telaAdminLogin(erro) {
   };
 }
 
+// Caixa de feedback que fica à direita dos envios.
+function caixaFeedback(ajuda) {
+  return `<aside class="coluna-feedback">
+      <div class="cartao">
+        <h2 style="margin-top:0">Enviar feedback</h2>
+        <p class="ajuda">${ajuda}</p>
+        <p class="qtd-selecionados" id="qtd">Nenhum envio marcado</p>
+        <textarea id="texto-feedback" maxlength="${MAX}" placeholder="Escreva o feedback"></textarea>
+        <div class="contador"></div>
+        <button id="enviar" class="largo">Enviar feedback</button>
+      </div>
+    </aside>`;
+}
+
+function mostrarSelecionados(selecionados) {
+  const n = selecionados.size;
+  const el = document.getElementById('qtd');
+  el.textContent = n ? `${n} envio${n === 1 ? '' : 's'} marcado${n === 1 ? '' : 's'}` : 'Nenhum envio marcado';
+  el.classList.toggle('tem', n > 0);
+  document.getElementById('enviar').textContent = n > 1 ? `Enviar feedback aos ${n} envios` : 'Enviar feedback';
+}
+
+function ligarEnvioFeedback(selecionados, recarregar) {
+  contador(document.getElementById('texto-feedback'));
+  document.getElementById('enviar').onclick = async (ev) => {
+    const texto = document.getElementById('texto-feedback').value.trim();
+    if (!selecionados.size) return avisar('Marque ao menos um envio.');
+    if (!texto) return avisar('Escreva o feedback.');
+    ev.target.disabled = true;
+    try {
+      const r = await api('/api/admin/feedback', { json: { ids: [...selecionados], feedback: texto } });
+      avisar(`Feedback enviado para ${r.atualizados} envio(s).`);
+      recarregar();
+    } catch (err) {
+      avisar(err.message);
+      ev.target.disabled = false;
+    }
+  };
+}
+
+async function telaAdminUsuario(id) {
+  let dados;
+  try {
+    dados = await api(`/api/admin/usuarios/${encodeURIComponent(id)}`);
+  } catch (err) {
+    if (err.status === 401) return telaAdminLogin();
+    avisar(err.message);
+    return ir('#/admin');
+  }
+  topoDoAdmin();
+  app.classList.add('largo');
+  const { usuario: u, turmas, envios } = dados;
+  const selecionados = new Set();
+  const semFeedback = envios.filter((e) => !e.feedback).length;
+
+  const blocoEnvio = (e) => `
+    <div class="cartao envio ${e.feedback ? '' : 'pendente'}">
+      <div class="envio-topo">
+        <label class="marcar"><input type="checkbox" data-id="${e.id}"> <strong>Módulo ${e.numero}</strong></label>
+        <span class="meta">Enviado em ${esc(formatarData(e.atualizado_em))}</span>
+        <span class="tag ${e.feedback ? 'sim' : 'novo'}">${e.feedback ? 'Com feedback' : 'Sem feedback'}</span>
+        <button class="link" data-so="${e.id}">dar feedback só neste</button>
+      </div>
+      <div class="detalhe">${detalheEnvio(e)}</div>
+    </div>`;
+
+  app.innerHTML = `
+    <p><a href="#/admin">← Painel admin</a></p>
+    <div class="cartao perfil-publico">
+      ${avatar(u.foto, 'enorme')}
+      <div>
+        <h1>${esc(u.nome)}</h1>
+        <span class="tag">${u.tipo === 'especialista' ? 'Especialista' : 'Instrutor'}</span>
+        <p class="meta" style="margin:8px 0 0">CPF ${esc(mascaraCpf(u.cpf))} · cadastro em ${esc(formatarData(u.criado_em))}</p>
+        <p class="meta" style="margin:0">${turmas.length} turma${turmas.length === 1 ? '' : 's'} · ${envios.length} módulo${envios.length === 1 ? '' : 's'} enviado${envios.length === 1 ? '' : 's'} · ${semFeedback} sem feedback</p>
+        ${linksRedes(u.redes)}
+      </div>
+    </div>
+    <div class="duas-colunas">
+      <div class="coluna-envios">
+        ${semFeedback ? '<p class="linha-botoes" style="margin-top:0"><button class="secundario" id="marcar-sem">Marcar todos sem feedback</button></p>' : ''}
+        ${turmas.map((t) => {
+          const daTurma = envios.filter((e) => e.turma_id === t.id).sort((a, b) => a.numero - b.numero);
+          const pendentes = [1, 2, 3, 4, 5, 6, 7, 8].filter((n) => !daTurma.some((e) => e.numero === n));
+          return `<section class="turma-ficha">
+            <h2>Turma de ${esc(t.cidade)} <span class="meta">${esc(t.sindicato)} · ${esc(t.horario)}</span></h2>
+            ${barraProgresso(daTurma.length)}
+            <p class="meta">${daTurma.length} de 8 módulos enviados${pendentes.length ? ` · pendentes: ${pendentes.join(', ')}` : ''}</p>
+            ${daTurma.map(blocoEnvio).join('') || '<div class="vazio">Nenhum módulo enviado nesta turma.</div>'}
+          </section>`;
+        }).join('') || '<div class="vazio">Esta pessoa ainda não cadastrou turmas.</div>'}
+      </div>
+      ${caixaFeedback('Marque os módulos ao lado (ou clique em "dar feedback só neste") e escreva aqui.')}
+    </div>`;
+
+  const marcar = (ids, sozinho) => {
+    if (sozinho) selecionados.clear();
+    ids.forEach((i) => selecionados.add(i));
+    app.querySelectorAll('[data-id]').forEach((c) => (c.checked = selecionados.has(Number(c.dataset.id))));
+    mostrarSelecionados(selecionados);
+  };
+  app.onchange = (ev) => {
+    const id = Number(ev.target.dataset?.id);
+    if (!id) return;
+    ev.target.checked ? selecionados.add(id) : selecionados.delete(id);
+    mostrarSelecionados(selecionados);
+  };
+  app.onclick = (ev) => {
+    const so = ev.target.closest('[data-so]');
+    if (so) {
+      const e = envios.find((x) => x.id === Number(so.dataset.so));
+      marcar([e.id], true);
+      const t = document.getElementById('texto-feedback');
+      if (!t.value && e.feedback) t.value = e.feedback;
+      t.dispatchEvent(new Event('input'));
+      t.focus();
+    }
+    if (ev.target.id === 'marcar-sem') marcar(envios.filter((e) => !e.feedback).map((e) => e.id), true);
+  };
+  ligarEnvioFeedback(selecionados, () => telaAdminUsuario(id));
+}
+
 function detalheEnvio(e) {
   let itens = [];
   if (e.dados) {
@@ -597,6 +719,7 @@ async function telaAdmin() {
     return telaAdminLogin(err.message);
   }
   topoDoAdmin();
+  app.classList.add('largo');
   const { envios, usuarios } = dados;
   const filtro = { tipo: '', modulo: '', feedback: '', busca: '' };
   const selecionados = new Set();
@@ -612,7 +735,8 @@ async function telaAdmin() {
       <div class="cartao"><strong>${envios.length}</strong><span>módulos enviados</span></div>
       <div class="cartao"><strong>${envios.filter((e) => !e.feedback).length}</strong><span>aguardando feedback</span></div>
     </div>
-    <p class="ajuda">Como dar feedback: marque os envios na tabela, escreva no quadro abaixo dela e clique em <strong>Enviar feedback aos selecionados</strong>.</p>
+    <div class="duas-colunas">
+    <div class="coluna-envios">
     <div class="filtros">
       <input id="busca" type="text" placeholder="Buscar por nome, CPF, cidade, sindicato...">
       <select id="tipo"><option value="">Todos os perfis</option><option value="especialista">Especialistas</option><option value="instrutor">Instrutores</option></select>
@@ -623,21 +747,18 @@ async function telaAdmin() {
     <div class="tabela"><table>
       <thead><tr>
         <th><input type="checkbox" id="todos" title="Selecionar todos os visíveis"></th>
-        <th>Nome</th><th>Perfil</th><th>Turma</th><th>Módulo</th><th>Enviado em</th><th>Feedback</th><th></th>
+        <th>Nome</th><th>Turma</th><th>Módulo</th><th>Enviado em</th><th>Feedback</th><th></th>
       </tr></thead>
       <tbody id="corpo"></tbody>
     </table></div>
-    <div class="barra-feedback">
-      <div class="cartao" style="margin:0">
-        <label for="texto-feedback" style="margin-top:0">Feedback em massa <span class="meta" id="qtd"></span></label>
-        <textarea id="texto-feedback" maxlength="${MAX}" placeholder="Escreva o feedback que será enviado para todos os envios selecionados"></textarea>
-        <div class="linha-botoes" style="margin-top:10px"><button id="enviar">Enviar feedback aos selecionados</button></div>
-      </div>
+    </div>
+    ${caixaFeedback('Marque os envios na tabela ao lado e escreva aqui. O mesmo feedback vai para todos os marcados.')}
     </div>
     <h2>Cadastrados</h2>
+    <p class="ajuda">Clique no nome para abrir a ficha da pessoa, com todos os envios.</p>
     <div class="tabela"><table>
       <thead><tr><th>Nome</th><th>CPF</th><th>Perfil</th><th>Turmas</th><th>Cadastro</th></tr></thead>
-      <tbody>${usuarios.map((u) => `<tr><td>${esc(u.nome)}</td><td>${esc(mascaraCpf(u.cpf))}</td><td>${esc(u.tipo)}</td><td>${u.turmas}</td><td>${esc(formatarData(u.criado_em))}</td></tr>`).join('') || '<tr><td colspan="5" class="meta">Ninguém cadastrado ainda.</td></tr>'}</tbody>
+      <tbody>${usuarios.map((u) => `<tr><td><a href="#/admin/usuario/${u.id}"><strong>${esc(u.nome)}</strong></a></td><td>${esc(mascaraCpf(u.cpf))}</td><td>${esc(u.tipo)}</td><td>${u.turmas}</td><td>${esc(formatarData(u.criado_em))}</td></tr>`).join('') || '<tr><td colspan="5" class="meta">Ninguém cadastrado ainda.</td></tr>'}</tbody>
     </table></div>`;
 
   const corpo = document.getElementById('corpo');
@@ -658,19 +779,18 @@ async function telaAdmin() {
     corpo.innerHTML = lista.map((e) => `
       <tr>
         <td><input type="checkbox" data-id="${e.id}" ${selecionados.has(e.id) ? 'checked' : ''}></td>
-        <td>${esc(e.nome)}<div class="meta">${esc(mascaraCpf(e.cpf))}</div></td>
-        <td>${esc(e.tipo)}</td>
+        <td><a href="#/admin/usuario/${e.usuario_id}"><strong>${esc(e.nome)}</strong></a><div class="meta">${e.tipo === 'especialista' ? 'Especialista' : 'Instrutor'}</div></td>
         <td>${esc(e.cidade)}<div class="meta">${esc(e.sindicato)} · ${esc(e.horario)}</div></td>
         <td>${e.numero}</td>
         <td>${esc(formatarData(e.atualizado_em))}</td>
         <td><span class="tag ${e.feedback ? 'sim' : ''}">${e.feedback ? 'sim' : 'não'}</span></td>
         <td><button class="link" data-ver="${e.id}">${abertos.has(e.id) ? 'fechar' : 'ver'}</button></td>
       </tr>
-      ${abertos.has(e.id) ? `<tr class="detalhe"><td></td><td colspan="7">${detalheEnvio(e)}</td></tr>` : ''}`).join('')
-      || '<tr><td colspan="8" class="meta">Nenhum envio encontrado.</td></tr>';
+      ${abertos.has(e.id) ? `<tr class="detalhe"><td></td><td colspan="6">${detalheEnvio(e)}</td></tr>` : ''}`).join('')
+      || '<tr><td colspan="7" class="meta">Nenhum envio encontrado.</td></tr>';
     const todos = document.getElementById('todos');
     todos.checked = lista.length > 0 && lista.every((e) => selecionados.has(e.id));
-    document.getElementById('qtd').textContent = `(${selecionados.size} selecionado${selecionados.size === 1 ? '' : 's'})`;
+    mostrarSelecionados(selecionados);
   }
 
   corpo.onclick = (ev) => {
@@ -695,18 +815,7 @@ async function telaAdmin() {
     document.getElementById(k).onchange = (ev) => { filtro[k] = ev.target.value; desenhar(); };
   }
   document.getElementById('busca').oninput = (ev) => { filtro.busca = ev.target.value.trim(); desenhar(); };
-  document.getElementById('enviar').onclick = async () => {
-    const texto = document.getElementById('texto-feedback').value.trim();
-    if (!selecionados.size) return avisar('Selecione ao menos um envio.');
-    if (!texto) return avisar('Escreva o feedback.');
-    try {
-      const r = await api('/api/admin/feedback', { json: { ids: [...selecionados], feedback: texto } });
-      avisar(`Feedback enviado para ${r.atualizados} envio(s).`);
-      telaAdmin();
-    } catch (err) {
-      avisar(err.message);
-    }
-  };
+  ligarEnvioFeedback(selecionados, telaAdmin);
   desenhar();
 }
 
@@ -1291,6 +1400,8 @@ async function telaTopico(id) {
 async function rotear() {
   app.onclick = null;
   app.onsubmit = null;
+  app.onchange = null;
+  app.classList.remove('largo');
   rotaAtual++;
   const partes = location.hash.replace(/^#\/?/, '').split('/');
   try {
@@ -1299,7 +1410,7 @@ async function rotear() {
       case 'cadastro': return await telaCadastro();
       case 'painel': return await telaPainel();
       case 'turma': return await telaTurma(partes[1], partes[2]);
-      case 'admin': return await telaAdmin();
+      case 'admin': return partes[1] === 'usuario' ? await telaAdminUsuario(partes[2]) : await telaAdmin();
       case 'avisos': return await telaAvisos();
       case 'material': return await telaMaterial();
       case 'perguntas': return await telaPerguntas();
