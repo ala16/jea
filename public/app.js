@@ -139,7 +139,10 @@ function topoDoUsuario(u) {
       <a href="#/avisos" data-area="avisos">Avisos<span class="badge" id="badge-avisos" hidden></span></a>
       <a href="#/forum/geral" data-area="forum">Fórum</a>
     </nav>
-    <div class="usuario">${avatar(u.foto)}<span>${esc(u.nome.split(' ')[0])} · ${u.tipo === 'especialista' ? 'Especialista' : 'Instrutor'}</span><button data-sair>Sair</button></div>`);
+    <div class="usuario">
+      <a class="meu-perfil" href="#/perfil" title="Editar meu perfil">${avatar(u.foto)}<span>${esc(u.nome.split(' ')[0])} · ${u.tipo === 'especialista' ? 'Especialista' : 'Instrutor'}</span><span class="lapis" aria-hidden="true">✎</span></a>
+      <button data-sair>Sair</button>
+    </div>`);
   estado.avisos = api('/api/avisos').then((r) => r.avisos).catch(() => []);
   estado.avisos.then(mostrarNaoLidos);
 }
@@ -689,6 +692,110 @@ async function telaAdmin() {
   desenhar();
 }
 
+// ---------- perfil ----------
+
+const REDES = [
+  { chave: 'instagram', nome: 'Instagram', exemplo: 'instagram.com/seuperfil' },
+  { chave: 'facebook', nome: 'Facebook', exemplo: 'facebook.com/seuperfil' },
+  { chave: 'linkedin', nome: 'LinkedIn', exemplo: 'linkedin.com/in/seuperfil' },
+  { chave: 'youtube', nome: 'YouTube', exemplo: 'youtube.com/@seucanal' },
+  { chave: 'site', nome: 'Site', exemplo: 'www.seusite.com.br' },
+];
+
+function linksRedes(redes) {
+  const itens = REDES.filter((r) => redes?.[r.chave]);
+  if (!itens.length) return '';
+  return `<div class="redes">${itens.map((r) => `<a class="botao secundario" href="${esc(redes[r.chave])}" target="_blank" rel="noopener nofollow">${r.nome}</a>`).join('')}</div>`;
+}
+
+async function telaPerfil() {
+  const u = await exigirUsuario();
+  if (!u) return;
+  const redes = u.redes || {};
+  app.innerHTML = `
+    <p><a href="#/painel">← Minhas turmas</a></p>
+    <h1>Meu perfil</h1>
+    <p class="sub">Atualize seu nome, sua foto e os links das suas redes sociais. Eles aparecem para os outros participantes no fórum.</p>
+    <form id="f" class="cartao">
+      <label style="margin-top:0">Foto do perfil <span class="ajuda">(até 5MB)</span></label>
+      <div class="foto-perfil">
+        <span class="avatar grande" id="previa" style="${u.foto ? `background-image:url('${esc(u.foto)}')` : ''}"></span>
+        <div style="flex:1">
+          <input id="foto" name="foto" type="file" accept="image/*">
+          ${u.foto ? '<label class="remover-foto"><input type="checkbox" name="removerFoto"> remover foto atual</label>' : ''}
+        </div>
+      </div>
+      <label for="nome">Nome completo</label>
+      <input id="nome" name="nome" type="text" maxlength="200" value="${esc(u.nome)}" required>
+      <label>Perfil</label>
+      <p class="meta" style="margin:0">${u.tipo === 'especialista' ? 'Especialista' : 'Instrutor'} · CPF ${esc(mascaraCpf(u.cpf))}</p>
+      <h2>Redes sociais <span class="ajuda">(opcional)</span></h2>
+      <p class="ajuda">Cole o link do seu perfil. Deixe em branco o que não usa.</p>
+      <div class="grade">
+        ${REDES.map((r) => `<div><label for="r_${r.chave}">${r.nome}</label>
+          <input id="r_${r.chave}" name="${r.chave}" type="text" inputmode="url" maxlength="300" placeholder="${r.exemplo}" value="${esc(redes[r.chave] || '')}"></div>`).join('')}
+      </div>
+      <div class="erro" id="erro"></div>
+      <div class="linha-botoes">
+        <button type="submit">Salvar perfil</button>
+        <a class="botao secundario" href="#/perfil/${u.id}">Ver como os outros veem</a>
+      </div>
+    </form>`;
+  const f = document.getElementById('f');
+  f.foto.onchange = () => {
+    const arq = f.foto.files[0];
+    if (arq) document.getElementById('previa').style.backgroundImage = `url(${URL.createObjectURL(arq)})`;
+  };
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const botao = f.querySelector('button[type=submit]');
+    if (botao.disabled) return;
+    botao.disabled = true;
+    try {
+      const arq = f.foto.files[0];
+      if (arq) botao.textContent = 'Enviando foto...';
+      const corpo = {
+        nome: f.nome.value,
+        foto: arq ? await enviarArquivo(arq, true) : null,
+        removerFoto: Boolean(f.removerFoto?.checked),
+        redes: Object.fromEntries(REDES.map((r) => [r.chave, f[r.chave].value])),
+      };
+      await api('/api/perfil', { json: corpo });
+      avisar('Perfil salvo.');
+      telaPerfil();
+    } catch (err) {
+      document.getElementById('erro').textContent = err.message;
+      botao.disabled = false;
+      botao.textContent = 'Salvar perfil';
+    }
+  };
+}
+
+async function telaVerPerfil(id) {
+  const leitor = await leitorDoForum();
+  if (!leitor) return;
+  let perfil;
+  try {
+    ({ perfil } = await api(`/api/perfil/${encodeURIComponent(id)}`));
+  } catch (err) {
+    if (err.status === 401) return ir('#/');
+    avisar(err.message);
+    return history.back();
+  }
+  const meu = leitor.usuario?.id === perfil.id;
+  app.innerHTML = `
+    <p><a href="javascript:history.back()">← Voltar</a></p>
+    <div class="cartao perfil-publico">
+      ${avatar(perfil.foto, 'enorme')}
+      <div>
+        <h1>${esc(perfil.nome)}</h1>
+        <span class="tag">${perfil.tipo === 'especialista' ? 'Especialista' : 'Instrutor'}</span>
+        ${linksRedes(perfil.redes) || '<p class="meta">Nenhuma rede social informada.</p>'}
+        ${meu ? '<p><a class="botao" href="#/perfil">Editar meu perfil</a></p>' : ''}
+      </div>
+    </div>`;
+}
+
 // ---------- telas de avisos ----------
 
 async function telaAvisos() {
@@ -789,10 +896,13 @@ async function leitorDoForum() {
   return { admin: true };
 }
 
-function autor(item) {
+function autor(item, link = true) {
   const foto = avatar(item.autor_foto, 'pequeno');
   const tipo = item.autor_tipo === 'especialista' ? 'Especialista' : item.autor_tipo === 'instrutor' ? 'Instrutor' : '';
-  return `<span class="autor">${foto}<strong>${esc(item.autor || 'Usuário removido')}</strong>${tipo ? `<span class="tag">${tipo}</span>` : ''}</span>`;
+  const nome = link && item.usuario_id
+    ? `<a href="#/perfil/${item.usuario_id}"><strong>${esc(item.autor || 'Usuário')}</strong></a>`
+    : `<strong>${esc(item.autor || 'Usuário removido')}</strong>`;
+  return `<span class="autor">${foto}${nome}${tipo ? `<span class="tag">${tipo}</span>` : ''}</span>`;
 }
 
 function imagemForum(url) {
@@ -838,7 +948,7 @@ async function telaForum(chave) {
       ${topicos.map((t) => `
         <a class="cartao topico" href="#/forum/topico/${t.id}">
           <h3>${esc(t.titulo)}</h3>
-          <div class="meta">${autor(t)} · ${t.respostas} resposta${t.respostas === 1 ? '' : 's'} · ${esc(formatarData(t.ultima_atividade))}</div>
+          <div class="meta">${autor(t, false)} · ${t.respostas} resposta${t.respostas === 1 ? '' : 's'} · ${esc(formatarData(t.ultima_atividade))}</div>
         </a>`).join('') || '<div class="vazio">Nenhum tópico ainda. Seja o primeiro a publicar.</div>'}
     </div>`;
   const f = document.getElementById('f');
@@ -961,6 +1071,7 @@ async function rotear() {
       case 'turma': return await telaTurma(partes[1], partes[2]);
       case 'admin': return await telaAdmin();
       case 'avisos': return await telaAvisos();
+      case 'perfil': return partes[1] ? await telaVerPerfil(partes[1]) : await telaPerfil();
       case 'admin-avisos': return await telaAdminAvisos();
       case 'forum':
         return partes[1] === 'topico' ? await telaTopico(partes[2]) : await telaForum(partes[1]);

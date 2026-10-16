@@ -145,7 +145,8 @@ app.get('/arquivos/:nome', async (req, res) => {
   const nome = path.basename(req.params.nome);
   const s = sessao(req);
   const url = `/arquivos/${nome}`;
-  if (await db.imagemDoForum(url)) {
+  // Imagens do fórum e fotos de perfil: qualquer pessoa logada vê.
+  if ((await db.imagemDoForum(url)) || (await db.fotoDePerfil(url))) {
     if (!s.admin && !s.cpf) return res.sendStatus(403);
     return res.sendFile(arquivos.caminhoLocal(nome));
   }
@@ -182,6 +183,45 @@ app.post('/api/cadastro', exigirCpf, async (req, res) => {
   const foto = lerArquivo(req.body.foto, { imagem: true });
   const usuario = await db.criarUsuario({ cpf: req.cpf, nome, tipo, foto: foto?.url || null });
   res.json({ usuario });
+});
+
+// Perfil: a pessoa edita nome, foto e redes sociais. O perfil (tipo) não muda.
+const REDES = ['instagram', 'facebook', 'linkedin', 'youtube', 'site'];
+
+function lerLink(v) {
+  let s = texto(v, 300).trim();
+  if (!s) return '';
+  if (!/^https?:\/\//i.test(s)) s = `https://${s.replace(/^\/+/, '')}`;
+  try {
+    const u = new URL(s);
+    if (!['http:', 'https:'].includes(u.protocol) || !u.hostname.includes('.')) throw new Error();
+    return u.href;
+  } catch {
+    throw Object.assign(new Error(`Link inválido: ${texto(v, 80)}`), { status: 400 });
+  }
+}
+
+app.post('/api/perfil', exigirUsuario, async (req, res) => {
+  const nome = texto(req.body.nome, 200).trim();
+  if (nome.split(/\s+/).length < 2) return res.status(400).json({ erro: 'Informe seu nome completo.' });
+  const redes = {};
+  for (const r of REDES) {
+    const link = lerLink(req.body.redes?.[r]);
+    if (link) redes[r] = link;
+  }
+  const nova = lerArquivo(req.body.foto, { imagem: true });
+  const antiga = req.usuario.foto;
+  const foto = nova ? nova.url : req.body.removerFoto ? null : antiga;
+  const usuario = await db.atualizarPerfil(req.usuario.id, { nome, foto, redes });
+  if (antiga && antiga !== foto) await arquivos.remover(antiga);
+  res.json({ usuario });
+});
+
+app.get('/api/perfil/:id', exigirLeitorForum, async (req, res) => {
+  const id = Number(req.params.id);
+  const perfil = Number.isInteger(id) ? await db.perfil(id) : null;
+  if (!perfil) return res.status(404).json({ erro: 'Perfil não encontrado.' });
+  res.json({ perfil });
 });
 
 // Turmas
