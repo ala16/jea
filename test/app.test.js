@@ -143,3 +143,46 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
   assert.equal((await a('/api/turmas')).body.turmas.length, 0);
   assert.equal((await a(anexo)).status, 404);
 });
+
+test('fórum: todos leem, cada um publica no geral e no seu', async () => {
+  const esp = cliente();
+  await esp('/api/entrar', { json: { cpf: '390.533.447-05' } });
+  await esp('/api/cadastro', { json: { nome: 'Ana Especialista', tipo: 'especialista' } });
+  const ins = cliente();
+  await ins('/api/entrar', { json: { cpf: '168.995.350-09' } });
+  await ins('/api/cadastro', { json: { nome: 'Beto Instrutor', tipo: 'instrutor' } });
+
+  assert.equal((await cliente()('/api/forum/geral')).status, 401);
+
+  let r = await esp('/api/forum/especialista', { json: { titulo: 'Dúvida', texto: 'Como faço o orçamento?' } });
+  assert.equal(r.status, 200);
+  const topicoEsp = r.body.topico.id;
+  assert.equal((await ins('/api/forum/especialista', { json: { titulo: 'x', texto: 'y' } })).status, 403);
+  assert.equal((await esp('/api/forum/instrutor', { json: { titulo: 'x', texto: 'y' } })).status, 403);
+  assert.equal((await ins('/api/forum/geral', { json: { titulo: 'Oi', texto: 'Olá a todos' } })).status, 200);
+  assert.equal((await ins('/api/forum/qualquer')).status, 404);
+
+  // Instrutor lê o fórum dos especialistas, mas não responde
+  r = await ins('/api/forum/especialista');
+  assert.equal(r.body.topicos.length, 1);
+  assert.equal(r.body.podePublicar, false);
+  r = await ins(`/api/forum/topico/${topicoEsp}`);
+  assert.equal(r.body.topico.texto, 'Como faço o orçamento?');
+  assert.equal((await ins(`/api/forum/topico/${topicoEsp}/respostas`, { json: { texto: 'z' } })).status, 403);
+
+  r = await esp(`/api/forum/topico/${topicoEsp}/respostas`, { json: { texto: 'Por módulo.' } });
+  assert.equal(r.status, 200);
+  const resp = r.body.resposta.id;
+  r = await esp('/api/forum/especialista');
+  assert.equal(r.body.topicos[0].respostas, 1);
+
+  // Só o autor ou o admin apagam
+  assert.equal((await ins(`/api/forum/resposta/${resp}`, { method: 'DELETE' })).status, 403);
+  const adm = cliente();
+  await adm('/api/admin/entrar', { json: { senha: 'segredo' } });
+  assert.equal((await adm('/api/forum/instrutor')).status, 200);
+  assert.equal((await adm(`/api/forum/resposta/${resp}`, { method: 'DELETE' })).status, 200);
+  assert.equal((await ins(`/api/forum/topico/${topicoEsp}`, { method: 'DELETE' })).status, 403);
+  assert.equal((await esp(`/api/forum/topico/${topicoEsp}`, { method: 'DELETE' })).status, 200);
+  assert.equal((await esp('/api/forum/especialista')).body.topicos.length, 0);
+});
