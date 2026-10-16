@@ -52,6 +52,10 @@ function conectar() {
     const pool = new Pool({ connectionString: url, max: 3, ssl: local ? false : { rejectUnauthorized: false } });
     return pool.query(SCHEMA).then(() => (sql, params) => pool.query(sql, params));
   }
+  if (process.env.VERCEL) {
+    // Na Vercel o disco é temporário: sem Postgres os dados se perderiam.
+    return Promise.reject(Object.assign(new Error('O banco de dados ainda não foi configurado na Vercel.'), { status: 503 }));
+  }
   const { PGlite } = require('@electric-sql/pglite');
   const dir = process.env.PGLITE_DIR || path.join(__dirname, 'data', 'pglite');
   if (dir !== 'memory://') fs.mkdirSync(dir, { recursive: true });

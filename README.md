@@ -12,7 +12,7 @@ A Vercel faz o deploy direto do GitHub a cada push na `main`. O projeto já vem 
    - um **Blob** com acesso *público*. Ele cria a variável `BLOB_READ_WRITE_TOKEN`.
 3. Em **Settings → Environment Variables**, adicione:
    - `ADMIN_PASSWORD`: a senha do acesso admin.
-   - `SESSION_SECRET`: um texto longo e aleatório (por exemplo, a saída de `openssl rand -hex 32`). Sem ele o site não funciona em produção.
+   - `SESSION_SECRET` (opcional): um texto longo e aleatório. Sem ele, a chave da sessão é derivada do `DATABASE_URL`.
 4. Faça um novo deploy (**Deployments → Redeploy**) para as variáveis valerem.
 5. Em **Settings → Domains**, adicione `jea.senarsp.com.br`. No DNS do `senarsp.com.br`, crie o registro que a Vercel mostrar (normalmente `CNAME jea → cname.vercel-dns.com`).
 
@@ -33,7 +33,7 @@ ADMIN_PASSWORD=sua-senha npm start
 | Variável | Para que serve |
 | --- | --- |
 | `ADMIN_PASSWORD` | Senha do acesso admin. Sem ela o admin fica desativado. |
-| `SESSION_SECRET` | Chave que assina o cookie de sessão. Obrigatória em produção. |
+| `SESSION_SECRET` | Chave que assina o cookie de sessão. Opcional: sem ela é derivada do `DATABASE_URL`. |
 | `DATABASE_URL` | Conexão Postgres (criada pela Vercel ao conectar o Neon). `POSTGRES_URL` também é aceita. |
 | `BLOB_READ_WRITE_TOKEN` | Token do Vercel Blob (criado pela Vercel ao conectar o Blob). |
 | `PORT` | Porta local (padrão 3000). |
