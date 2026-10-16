@@ -105,7 +105,7 @@ async function enviarArquivo(arquivo, imagem) {
 
 // ---------- sessão ----------
 
-let estado = { usuario: null };
+let estado = { usuario: null, avisos: Promise.resolve([]) };
 
 async function carregarUsuario() {
   try {
@@ -122,17 +122,69 @@ function desenharTopo(conteudo) {
   topoUsuario.innerHTML = conteudo || '';
   const sair = topoUsuario.querySelector('[data-sair]');
   if (sair) sair.onclick = async () => { await api('/api/sair', { method: 'POST' }); ir('#/'); };
+  // Destaca no menu a área em que a pessoa está.
+  const atual = location.hash.replace(/^#\/?/, '').split('/')[0];
+  topoUsuario.querySelectorAll('.menu a').forEach((a) => {
+    a.classList.toggle('ativa', a.dataset.area.split(' ').includes(atual));
+  });
+}
+
+function avatar(foto, classe = '') {
+  return foto ? `<img class="avatar ${classe}" src="${esc(foto)}" alt="">` : `<span class="avatar ${classe}"></span>`;
 }
 
 function topoDoUsuario(u) {
-  const foto = u.foto ? `<img class="avatar" src="${esc(u.foto)}" alt="">` : '<span class="avatar"></span>';
-  desenharTopo(`<nav class="menu"><a href="#/painel">Minhas turmas</a><a href="#/forum/geral">Fórum</a></nav>
-    <div class="usuario">${foto}<span>${esc(u.nome)} · ${u.tipo === 'especialista' ? 'Especialista' : 'Instrutor'}</span><button data-sair>Sair</button></div>`);
+  desenharTopo(`<nav class="menu">
+      <a href="#/painel" data-area="painel turma">Minhas turmas</a>
+      <a href="#/avisos" data-area="avisos">Avisos<span class="badge" id="badge-avisos" hidden></span></a>
+      <a href="#/forum/geral" data-area="forum">Fórum</a>
+    </nav>
+    <div class="usuario">${avatar(u.foto)}<span>${esc(u.nome.split(' ')[0])} · ${u.tipo === 'especialista' ? 'Especialista' : 'Instrutor'}</span><button data-sair>Sair</button></div>`);
+  estado.avisos = api('/api/avisos').then((r) => r.avisos).catch(() => []);
+  estado.avisos.then(mostrarNaoLidos);
 }
 
 function topoDoAdmin() {
-  desenharTopo(`<nav class="menu"><a href="#/admin">Envios</a><a href="#/forum/geral">Fórum</a></nav>
+  desenharTopo(`<nav class="menu">
+      <a href="#/admin" data-area="admin">Envios</a>
+      <a href="#/admin-avisos" data-area="admin-avisos">Avisos</a>
+      <a href="#/forum/geral" data-area="forum">Fórum</a>
+    </nav>
     <div class="usuario"><span>Admin</span><button data-sair>Sair</button></div>`);
+}
+
+// ---------- avisos (lidos ficam guardados no navegador) ----------
+
+const PUBLICOS = { todos: 'Para todos', especialista: 'Para especialistas', instrutor: 'Para instrutores' };
+
+function chaveLidos() {
+  return `jea-avisos-lidos-${estado.usuario?.id || 0}`;
+}
+
+function ultimoLido() {
+  try { return Number(localStorage.getItem(chaveLidos())) || 0; } catch { return 0; }
+}
+
+function marcarLidos(avisos) {
+  try { localStorage.setItem(chaveLidos(), String(Math.max(ultimoLido(), ...avisos.map((a) => a.id)))); } catch { /* sem armazenamento */ }
+  mostrarNaoLidos(avisos);
+}
+
+function mostrarNaoLidos(avisos) {
+  const badge = document.getElementById('badge-avisos');
+  if (!badge) return;
+  const n = avisos.filter((a) => a.id > ultimoLido()).length;
+  badge.textContent = n;
+  badge.hidden = !n;
+}
+
+function cartaoAviso(a, { novo, apagar } = {}) {
+  return `<article class="cartao aviso-item ${novo ? 'novo' : ''}">
+      <div class="meta">${novo ? '<span class="tag novo">Novo</span> ' : ''}${esc(formatarData(a.criado_em))} · ${PUBLICOS[a.publico] || ''}
+        ${apagar ? `<button class="link perigo" data-apagar-aviso="${a.id}">apagar</button>` : ''}</div>
+      <h3>${esc(a.titulo)}</h3>
+      <div class="mensagem">${esc(a.texto)}</div>
+    </article>`;
 }
 
 // ---------- telas ----------
@@ -140,29 +192,32 @@ function topoDoAdmin() {
 function telaInicio() {
   desenharTopo('');
   app.innerHTML = `
-    <div class="centro cartao">
-      <h1>Bem-vindo</h1>
-      <p class="sub">Digite seu CPF para entrar.</p>
+    <div class="centro cartao entrada">
+      <h1>Bem-vindo ao JEA</h1>
+      <p class="sub">Digite seu CPF para entrar. Se for seu primeiro acesso, o cadastro é feito logo em seguida.</p>
       <form id="f">
-        <label for="cpf">CPF</label>
-        <input id="cpf" type="text" inputmode="numeric" autocomplete="off" placeholder="000.000.000-00" required>
+        <label for="cpf">Seu CPF</label>
+        <input id="cpf" class="grande" type="text" inputmode="numeric" autocomplete="off" placeholder="000.000.000-00" required>
         <div class="erro" id="erro"></div>
-        <div class="linha-botoes">
-          <button type="submit">Entrar</button>
-          <a class="botao secundario" href="#/admin">Acesso admin</a>
-        </div>
+        <button type="submit" class="largo">Entrar</button>
       </form>
+      <p class="rodape-entrada"><a href="#/admin">Acesso admin</a></p>
     </div>`;
   const cpf = document.getElementById('cpf');
   cpf.addEventListener('input', () => (cpf.value = mascaraCpf(cpf.value)));
   cpf.focus();
   document.getElementById('f').onsubmit = async (e) => {
     e.preventDefault();
+    const botao = e.target.querySelector('button');
+    botao.disabled = true;
+    botao.textContent = 'Entrando...';
     try {
       const r = await api('/api/entrar', { json: { cpf: cpf.value } });
       ir(r.primeiroAcesso ? '#/cadastro' : '#/painel');
     } catch (err) {
       document.getElementById('erro').textContent = err.message;
+      botao.disabled = false;
+      botao.textContent = 'Entrar';
     }
   };
 }
@@ -174,29 +229,37 @@ async function telaCadastro() {
   desenharTopo('<div class="usuario"><button data-sair>Sair</button></div>');
   app.innerHTML = `
     <div class="centro cartao" style="max-width:520px">
-      <h1>Primeiro acesso</h1>
-      <p class="sub">CPF ${esc(mascaraCpf(r.cpf))}. Complete seu cadastro.</p>
+      <p class="passo">Primeiro acesso</p>
+      <h1>Complete seu cadastro</h1>
+      <p class="sub">CPF ${esc(mascaraCpf(r.cpf))}. Só precisa fazer isso uma vez.</p>
       <form id="f">
         <label for="nome">Nome completo</label>
-        <input id="nome" name="nome" type="text" maxlength="200" required>
-        <label for="foto">Foto do perfil <span class="ajuda">(opcional, até 5MB)</span></label>
-        <input id="foto" name="foto" type="file" accept="image/*">
+        <input id="nome" name="nome" type="text" maxlength="200" autocomplete="name" required>
         <label>Você é</label>
         <div class="opcoes">
-          <label><input type="radio" name="tipo" value="especialista" required>Especialista</label>
-          <label><input type="radio" name="tipo" value="instrutor" required>Instrutor</label>
+          <label><input type="radio" name="tipo" value="especialista" required><span><strong>Especialista</strong><small>Preenche o planejamento e a expedição do agro</small></span></label>
+          <label><input type="radio" name="tipo" value="instrutor" required><span><strong>Instrutor</strong><small>Envia texto e imagem em cada módulo</small></span></label>
         </div>
+        <label for="foto">Foto do perfil <span class="ajuda">(opcional, até 5MB)</span></label>
+        <div class="foto-perfil"><span class="avatar grande" id="previa"></span><input id="foto" name="foto" type="file" accept="image/*"></div>
         <div class="erro" id="erro"></div>
         <div class="linha-botoes"><button type="submit">Concluir cadastro</button></div>
       </form>
     </div>`;
   const f = document.getElementById('f');
+  f.nome.focus();
+  f.foto.onchange = () => {
+    const arq = f.foto.files[0];
+    const previa = document.getElementById('previa');
+    previa.style.backgroundImage = arq ? `url(${URL.createObjectURL(arq)})` : '';
+  };
   f.onsubmit = async (e) => {
     e.preventDefault();
     const botao = f.querySelector('button[type=submit]');
     botao.disabled = true;
     try {
       const foto = f.foto.files[0];
+      if (foto) botao.textContent = 'Enviando foto...';
       await api('/api/cadastro', {
         json: {
           nome: f.nome.value,
@@ -208,6 +271,7 @@ async function telaCadastro() {
     } catch (err) {
       document.getElementById('erro').textContent = err.message;
       botao.disabled = false;
+      botao.textContent = 'Concluir cadastro';
     }
   };
 }
@@ -220,41 +284,74 @@ async function exigirUsuario() {
   return r.usuario;
 }
 
+function barraProgresso(n) {
+  return `<div class="progresso" title="${n} de 8 módulos enviados"><span style="width:${(n / 8) * 100}%"></span></div>`;
+}
+
 async function telaPainel() {
   const u = await exigirUsuario();
   if (!u) return;
-  const { turmas } = await api('/api/turmas');
+  const [{ turmas }, avisos] = await Promise.all([api('/api/turmas'), estado.avisos]);
+  const novos = avisos.filter((a) => a.id > ultimoLido());
   app.innerHTML = `
-    <h1>Olá, ${esc(u.nome.split(' ')[0])}</h1>
-    <p class="sub">Suas turmas. Cada turma tem 8 módulos para preencher.</p>
-    <div class="lista-turmas">
-      ${turmas.map((t) => `
-        <a class="cartao turma" href="#/turma/${t.id}/1">
-          <h3>${esc(t.cidade)}</h3>
-          <div class="meta">${esc(t.sindicato)}</div>
-          <div class="meta">${esc(t.horario)}</div>
-          <div class="meta" style="margin-top:8px">${t.modulos_enviados}/8 módulos enviados${t.feedbacks ? ` · ${t.feedbacks} com feedback` : ''}</div>
-        </a>`).join('') || '<p class="meta">Você ainda não cadastrou nenhuma turma.</p>'}
+    <div class="cabecalho">
+      <div>
+        <h1>Olá, ${esc(u.nome.split(' ')[0])}</h1>
+        <p class="sub">Aqui ficam suas turmas. Cada turma tem 8 módulos para preencher.</p>
+      </div>
+      <button id="nova" class="botao-grande">+ Cadastrar nova turma</button>
     </div>
-    <div class="cartao" style="margin-top:24px">
-      <h2 style="margin-top:0">Cadastrar nova turma</h2>
+    <div class="cartao form-turma" id="form-turma" hidden>
+      <h2>Nova turma</h2>
+      <p class="ajuda">Preencha os 3 campos e clique em <strong>Salvar turma</strong>.</p>
       <form id="f">
         <div class="grade">
-          <div><label for="cidade">Cidade</label><input id="cidade" name="cidade" type="text" maxlength="200" required></div>
-          <div><label for="sindicato">Sindicato rural</label><input id="sindicato" name="sindicato" type="text" maxlength="200" required></div>
-          <div>
-            <label>Horário</label>
-            <div class="horario">
-              <label>Entrada<input id="entrada" type="time" required></label>
-              <label>Saída<input id="saida" type="time" required></label>
-            </div>
-          </div>
+          <div><label for="cidade">Cidade</label><input id="cidade" name="cidade" type="text" maxlength="200" placeholder="Ex.: Ribeirão Preto" required></div>
+          <div><label for="sindicato">Sindicato rural</label><input id="sindicato" name="sindicato" type="text" maxlength="200" placeholder="Ex.: Sindicato Rural de Ribeirão Preto" required></div>
+        </div>
+        <label>Horário da aula</label>
+        <div class="horario">
+          <label>Entrada<input id="entrada" type="time" required></label>
+          <label>Saída<input id="saida" type="time" required></label>
         </div>
         <div class="erro" id="erro"></div>
-        <div class="linha-botoes"><button type="submit">Cadastrar turma</button></div>
+        <div class="linha-botoes">
+          <button type="submit">Salvar turma</button>
+          <button type="button" class="secundario" id="cancelar">Cancelar</button>
+        </div>
       </form>
-    </div>`;
+    </div>
+    ${novos.length ? `
+      <div class="cartao destaque-avisos">
+        <h2>${novos.length === 1 ? 'Você tem 1 aviso novo' : `Você tem ${novos.length} avisos novos`}</h2>
+        ${novos.slice(0, 2).map((a) => `<p><strong>${esc(a.titulo)}</strong> · <span class="meta">${esc(formatarData(a.criado_em))}</span></p>`).join('')}
+        <a class="botao secundario" href="#/avisos">Ler avisos</a>
+      </div>` : ''}
+    <h2>Minhas turmas ${turmas.length ? `<span class="meta">(${turmas.length})</span>` : ''}</h2>
+    <div class="lista-turmas">
+      ${turmas.map((t) => `
+        <a class="cartao turma" href="#/turma/${t.id}/${Math.min(8, t.modulos_enviados + 1)}">
+          <h3>${esc(t.cidade)}</h3>
+          <div class="meta">${esc(t.sindicato)}</div>
+          <div class="meta">Horário: ${esc(t.horario)}</div>
+          ${barraProgresso(t.modulos_enviados)}
+          <div class="meta">${t.modulos_enviados} de 8 módulos enviados${t.feedbacks ? ` · <strong class="verde">${t.feedbacks} feedback${t.feedbacks === 1 ? '' : 's'}</strong>` : ''}</div>
+          <span class="abrir">Abrir turma →</span>
+        </a>`).join('')}
+    </div>
+    ${turmas.length ? '' : '<div class="vazio">Você ainda não tem turmas. Clique em <strong>+ Cadastrar nova turma</strong> para começar.</div>'}`;
+
+  const caixa = document.getElementById('form-turma');
+  const nova = document.getElementById('nova');
   const f = document.getElementById('f');
+  const abrir = (sim) => {
+    caixa.hidden = !sim;
+    nova.hidden = sim;
+    if (sim) f.cidade.focus();
+  };
+  nova.onclick = () => abrir(true);
+  document.getElementById('cancelar').onclick = () => { f.reset(); abrir(false); };
+  if (!turmas.length) abrir(true);
   // Clicar em qualquer parte do campo abre o relógio do navegador.
   f.querySelectorAll('input[type=time]').forEach((i) => (i.onclick = () => i.showPicker?.()));
   f.onsubmit = async (e) => {
@@ -268,7 +365,7 @@ async function telaPainel() {
       const dados = Object.fromEntries(new FormData(f));
       dados.horario = `${f.entrada.value} às ${f.saida.value}`;
       const { turma } = await api('/api/turmas', { json: dados });
-      avisar('Turma cadastrada.');
+      avisar('Turma cadastrada. Agora preencha o módulo 1.');
       ir(`#/turma/${turma.id}/1`);
     } catch (err) {
       document.getElementById('erro').textContent = err.message;
@@ -344,22 +441,26 @@ async function telaTurma(turmaId, numero) {
   const especial = !instrutor && numero === 1;
 
   app.innerHTML = `
-    <p style="display:flex;justify-content:space-between;gap:12px">
-      <a href="#/painel">← Minhas turmas</a>
-      <button class="link" id="excluir-turma" style="color:var(--erro)">Excluir turma</button>
-    </p>
+    <p><a href="#/painel">← Minhas turmas</a></p>
     <h1>Turma de ${esc(turma.cidade)}</h1>
-    <p class="sub">${esc(turma.sindicato)} · ${esc(turma.horario)}</p>
-    <nav class="abas">
+    <p class="sub">${esc(turma.sindicato)} · Horário: ${esc(turma.horario)}</p>
+    <div class="resumo-turma">
+      ${barraProgresso(modulos.length)}
+      <span class="meta">${modulos.length} de 8 módulos enviados</span>
+    </div>
+    <p class="ajuda">Escolha o módulo, preencha e clique em <strong>Enviar módulo</strong>. Você pode voltar e alterar quando quiser.</p>
+    <nav class="modulos">
       ${[1, 2, 3, 4, 5, 6, 7, 8].map((n) => {
-        const enviado = modulos.some((x) => x.numero === n);
-        return `<a href="#/turma/${turma.id}/${n}" class="${n === numero ? 'ativa' : ''} ${enviado ? 'enviado' : ''}">Módulo ${n}${enviado ? ' ✓' : ''}</a>`;
+        const x = modulos.find((y) => y.numero === n);
+        const estadoMod = x?.feedback ? 'Com feedback' : x ? 'Enviado' : 'Pendente';
+        return `<a href="#/turma/${turma.id}/${n}" class="${n === numero ? 'ativa' : ''} ${x ? 'enviado' : ''} ${x?.feedback ? 'com-feedback' : ''}">
+          <strong>Módulo ${n}</strong><small>${x ? '✓ ' : ''}${estadoMod}</small></a>`;
       }).join('')}
     </nav>
     <div class="cartao">
       <h2 style="margin-top:0">Módulo ${numero}${especial ? ' · Planejamento' : ''}</h2>
-      ${m?.feedback ? `<div class="feedback"><strong>Feedback (${esc(formatarData(m.feedback_em))}):</strong>\n${esc(m.feedback)}</div>` : ''}
-      ${m ? `<p class="meta">Último envio: ${esc(formatarData(m.atualizado_em))}</p>` : ''}
+      ${m?.feedback ? `<div class="feedback"><strong>Feedback do admin (${esc(formatarData(m.feedback_em))}):</strong>\n${esc(m.feedback)}</div>` : ''}
+      <p class="meta">${m ? `Enviado em ${esc(formatarData(m.atualizado_em))}` : 'Ainda não enviado.'}</p>
       <form id="f">
         ${especial ? formModulo1Especialista(m) : formModuloSimples(m, instrutor)}
         <div class="erro" id="erro"></div>
@@ -368,6 +469,13 @@ async function telaTurma(turmaId, numero) {
           ${m?.anexo ? '<label style="margin:0;font-weight:400"><input type="checkbox" name="removerAnexo" value="1"> remover arquivo atual</label>' : ''}
         </div>
       </form>
+    </div>
+    <div class="navegacao-modulos">
+      ${numero > 1 ? `<a class="botao secundario" href="#/turma/${turma.id}/${numero - 1}">← Módulo ${numero - 1}</a>` : '<span></span>'}
+      ${numero < 8 ? `<a class="botao secundario" href="#/turma/${turma.id}/${numero + 1}">Módulo ${numero + 1} →</a>` : ''}
+    </div>
+    <div class="zona-perigo">
+      <button class="link perigo" id="excluir-turma">Excluir esta turma</button>
     </div>`;
 
   document.getElementById('excluir-turma').onclick = async () => {
@@ -405,6 +513,7 @@ async function telaTurma(turmaId, numero) {
       await api(`/api/turmas/${turma.id}/modulos/${numero}`, { json: corpo });
       avisar(`Módulo ${numero} salvo.`);
       telaTurma(turma.id, numero);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       document.getElementById('erro').textContent = err.message;
       botao.disabled = false;
@@ -473,8 +582,16 @@ async function telaAdmin() {
   const abertos = new Set();
 
   app.innerHTML = `
-    <h1>Painel admin</h1>
-    <p class="sub">${usuarios.length} cadastrados · ${envios.length} módulos enviados</p>
+    <div class="cabecalho">
+      <div><h1>Painel admin</h1><p class="sub">Veja os envios e dê feedback para vários de uma vez.</p></div>
+      <a class="botao-grande" href="#/admin-avisos">+ Enviar aviso</a>
+    </div>
+    <div class="numeros">
+      <div class="cartao"><strong>${usuarios.length}</strong><span>cadastrados</span></div>
+      <div class="cartao"><strong>${envios.length}</strong><span>módulos enviados</span></div>
+      <div class="cartao"><strong>${envios.filter((e) => !e.feedback).length}</strong><span>aguardando feedback</span></div>
+    </div>
+    <p class="ajuda">Como dar feedback: marque os envios na tabela, escreva no quadro abaixo dela e clique em <strong>Enviar feedback aos selecionados</strong>.</p>
     <div class="filtros">
       <input id="busca" type="text" placeholder="Buscar por nome, CPF, cidade, sindicato...">
       <select id="tipo"><option value="">Todos os perfis</option><option value="especialista">Especialistas</option><option value="instrutor">Instrutores</option></select>
@@ -572,6 +689,80 @@ async function telaAdmin() {
   desenhar();
 }
 
+// ---------- telas de avisos ----------
+
+async function telaAvisos() {
+  const u = await exigirUsuario();
+  if (!u) return;
+  const avisos = await estado.avisos;
+  const lido = ultimoLido();
+  app.innerHTML = `
+    <h1>Avisos</h1>
+    <p class="sub">Comunicados enviados pela coordenação.</p>
+    ${avisos.map((a) => cartaoAviso(a, { novo: a.id > lido })).join('') || '<div class="vazio">Nenhum aviso por enquanto.</div>'}`;
+  marcarLidos(avisos);
+}
+
+async function telaAdminAvisos() {
+  let avisos;
+  try {
+    ({ avisos } = await api('/api/avisos'));
+  } catch (err) {
+    if (err.status === 401 || err.status === 403) return telaAdminLogin();
+    throw err;
+  }
+  topoDoAdmin();
+  app.innerHTML = `
+    <h1>Avisos</h1>
+    <p class="sub">Os avisos aparecem para os usuários na tela inicial do painel e no menu Avisos.</p>
+    <form id="f" class="cartao">
+      <h2 style="margin-top:0">Novo aviso</h2>
+      <label for="titulo">Título</label>
+      <input id="titulo" name="titulo" type="text" maxlength="200" placeholder="Ex.: Prazo do módulo 2" required>
+      <label for="texto">Mensagem</label>
+      <textarea id="texto" name="texto" maxlength="${MAX}" required></textarea>
+      <div class="contador"></div>
+      <label>Quem vai receber</label>
+      <div class="opcoes">
+        <label><input type="radio" name="publico" value="todos" checked>Todos</label>
+        <label><input type="radio" name="publico" value="especialista">Só especialistas</label>
+        <label><input type="radio" name="publico" value="instrutor">Só instrutores</label>
+      </div>
+      <div class="erro" id="erro"></div>
+      <div class="linha-botoes"><button type="submit">Enviar aviso</button></div>
+    </form>
+    <h2>Avisos enviados <span class="meta">(${avisos.length})</span></h2>
+    ${avisos.map((a) => cartaoAviso(a, { apagar: true })).join('') || '<div class="vazio">Nenhum aviso enviado ainda.</div>'}`;
+
+  const f = document.getElementById('f');
+  contador(f.texto);
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const botao = f.querySelector('button[type=submit]');
+    if (botao.disabled) return;
+    botao.disabled = true;
+    try {
+      await api('/api/admin/avisos', { json: { titulo: f.titulo.value, texto: f.texto.value, publico: f.publico.value } });
+      avisar('Aviso enviado.');
+      telaAdminAvisos();
+    } catch (err) {
+      document.getElementById('erro').textContent = err.message;
+      botao.disabled = false;
+    }
+  };
+  app.onclick = async (ev) => {
+    const b = ev.target.closest('[data-apagar-aviso]');
+    if (!b || !confirm('Apagar este aviso? Ele some para todos.')) return;
+    try {
+      await api(`/api/admin/avisos/${b.dataset.apagarAviso}`, { method: 'DELETE' });
+      avisar('Aviso apagado.');
+      telaAdminAvisos();
+    } catch (err) {
+      avisar(err.message);
+    }
+  };
+}
+
 // ---------- fórum ----------
 
 const FORUNS = [
@@ -599,7 +790,7 @@ async function leitorDoForum() {
 }
 
 function autor(item) {
-  const foto = item.autor_foto ? `<img class="avatar pequeno" src="${esc(item.autor_foto)}" alt="">` : '<span class="avatar pequeno"></span>';
+  const foto = avatar(item.autor_foto, 'pequeno');
   const tipo = item.autor_tipo === 'especialista' ? 'Especialista' : item.autor_tipo === 'instrutor' ? 'Instrutor' : '';
   return `<span class="autor">${foto}<strong>${esc(item.autor || 'Usuário removido')}</strong>${tipo ? `<span class="tag">${tipo}</span>` : ''}</span>`;
 }
@@ -648,7 +839,7 @@ async function telaForum(chave) {
         <a class="cartao topico" href="#/forum/topico/${t.id}">
           <h3>${esc(t.titulo)}</h3>
           <div class="meta">${autor(t)} · ${t.respostas} resposta${t.respostas === 1 ? '' : 's'} · ${esc(formatarData(t.ultima_atividade))}</div>
-        </a>`).join('') || '<p class="meta">Nenhum tópico ainda.</p>'}
+        </a>`).join('') || '<div class="vazio">Nenhum tópico ainda. Seja o primeiro a publicar.</div>'}
     </div>`;
   const f = document.getElementById('f');
   if (!f) return;
@@ -769,6 +960,8 @@ async function rotear() {
       case 'painel': return await telaPainel();
       case 'turma': return await telaTurma(partes[1], partes[2]);
       case 'admin': return await telaAdmin();
+      case 'avisos': return await telaAvisos();
+      case 'admin-avisos': return await telaAdminAvisos();
       case 'forum':
         return partes[1] === 'topico' ? await telaTopico(partes[2]) : await telaForum(partes[1]);
       default: return ir('#/');

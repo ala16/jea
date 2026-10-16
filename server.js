@@ -327,6 +327,27 @@ app.delete('/api/forum/resposta/:id', exigirLeitorForum, async (req, res) => {
   res.json({ ok: true });
 });
 
+// Avisos: o admin publica; cada usuário vê os gerais e os do seu perfil.
+const PUBLICOS = ['todos', 'especialista', 'instrutor'];
+
+app.get('/api/avisos', exigirLeitorForum, async (req, res) => {
+  res.json({ avisos: await db.avisos(req.admin ? null : req.usuario.tipo) });
+});
+
+app.post('/api/admin/avisos', exigirAdmin, async (req, res) => {
+  const titulo = texto(req.body.titulo, 200).trim();
+  const corpo = texto(req.body.texto).trim();
+  const publico = PUBLICOS.includes(req.body.publico) ? req.body.publico : 'todos';
+  if (!titulo || !corpo) return res.status(400).json({ erro: 'Escreva o título e a mensagem do aviso.' });
+  res.json({ aviso: await db.criarAviso({ titulo, texto: corpo, publico }) });
+});
+
+app.delete('/api/admin/avisos/:id', exigirAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || !(await db.excluirAviso(id))) return res.status(404).json({ erro: 'Aviso não encontrado.' });
+  res.json({ ok: true });
+});
+
 // Admin
 app.post('/api/admin/entrar', (req, res) => {
   if (!ADMIN_PASSWORD) return res.status(503).json({ erro: 'Acesso admin não configurado (defina ADMIN_PASSWORD).' });
