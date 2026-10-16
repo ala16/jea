@@ -604,6 +604,10 @@ function autor(item) {
   return `<span class="autor">${foto}<strong>${esc(item.autor || 'Usuário removido')}</strong>${tipo ? `<span class="tag">${tipo}</span>` : ''}</span>`;
 }
 
+function imagemForum(url) {
+  return url ? `<a class="imagem-forum" href="${esc(url)}" target="_blank" rel="noopener"><img src="${esc(url)}" alt="Imagem enviada"></a>` : '';
+}
+
 async function telaForum(chave) {
   const forum = FORUNS.find((f) => f.chave === chave) || FORUNS[0];
   const minhaRota = rotaAtual;
@@ -631,8 +635,10 @@ async function telaForum(chave) {
           <label for="titulo">Título</label>
           <input id="titulo" name="titulo" type="text" maxlength="200" required>
           <label for="texto">Mensagem</label>
-          <textarea id="texto" name="texto" maxlength="${MAX}" required></textarea>
+          <textarea id="texto" name="texto" maxlength="${MAX}"></textarea>
           <div class="contador"></div>
+          <label for="imagem">Imagem <span class="ajuda">(opcional, até 5MB)</span></label>
+          <input id="imagem" name="imagem" type="file" accept="image/*">
           <div class="erro" id="erro"></div>
           <div class="linha-botoes"><button type="submit">Publicar</button></div>
         </form>
@@ -653,11 +659,15 @@ async function telaForum(chave) {
     if (botao.disabled) return;
     botao.disabled = true;
     try {
-      const { topico } = await api(`/api/forum/${forum.chave}`, { json: { titulo: f.titulo.value, texto: f.texto.value } });
+      const arquivo = f.imagem.files[0];
+      if (arquivo) botao.textContent = 'Enviando imagem...';
+      const imagem = arquivo ? await enviarArquivo(arquivo, true) : null;
+      const { topico } = await api(`/api/forum/${forum.chave}`, { json: { titulo: f.titulo.value, texto: f.texto.value, imagem } });
       ir(`#/forum/topico/${topico.id}`);
     } catch (err) {
       document.getElementById('erro').textContent = err.message;
       botao.disabled = false;
+      botao.textContent = 'Publicar';
     }
   };
 }
@@ -685,6 +695,7 @@ async function telaTopico(id) {
       <div class="meta">${autor(topico)} · ${esc(formatarData(topico.criado_em))}
         ${podeApagar(topico) ? '<button class="link perigo" data-apagar-topico>apagar tópico</button>' : ''}</div>
       <div class="mensagem">${esc(topico.texto)}</div>
+      ${imagemForum(topico.imagem)}
     </div>
     <h2>${respostas.length} resposta${respostas.length === 1 ? '' : 's'}</h2>
     ${respostas.map((r) => `
@@ -692,12 +703,15 @@ async function telaTopico(id) {
         <div class="meta">${autor(r)} · ${esc(formatarData(r.criado_em))}
           ${podeApagar(r) ? `<button class="link perigo" data-apagar-resposta="${r.id}">apagar</button>` : ''}</div>
         <div class="mensagem">${esc(r.texto)}</div>
+        ${imagemForum(r.imagem)}
       </div>`).join('')}
     ${podePublicar ? `
       <form id="f" class="cartao">
         <label for="texto" style="margin-top:0">Sua resposta</label>
-        <textarea id="texto" name="texto" maxlength="${MAX}" required></textarea>
+        <textarea id="texto" name="texto" maxlength="${MAX}"></textarea>
         <div class="contador"></div>
+        <label for="imagem">Imagem <span class="ajuda">(opcional, até 5MB)</span></label>
+        <input id="imagem" name="imagem" type="file" accept="image/*">
         <div class="erro" id="erro"></div>
         <div class="linha-botoes"><button type="submit">Responder</button></div>
       </form>` : ''}`;
@@ -729,11 +743,15 @@ async function telaTopico(id) {
     if (botao.disabled) return;
     botao.disabled = true;
     try {
-      await api(`/api/forum/topico/${topico.id}/respostas`, { json: { texto: f.texto.value } });
+      const arquivo = f.imagem.files[0];
+      if (arquivo) botao.textContent = 'Enviando imagem...';
+      const imagem = arquivo ? await enviarArquivo(arquivo, true) : null;
+      await api(`/api/forum/topico/${topico.id}/respostas`, { json: { texto: f.texto.value, imagem } });
       telaTopico(topico.id);
     } catch (err) {
       document.getElementById('erro').textContent = err.message;
       botao.disabled = false;
+      botao.textContent = 'Responder';
     }
   };
 }

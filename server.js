@@ -144,7 +144,12 @@ app.post('/api/upload', exigirCpf, arquivos.uploadLocal);
 app.get('/arquivos/:nome', async (req, res) => {
   const nome = path.basename(req.params.nome);
   const s = sessao(req);
-  const dono = await db.donoDoArquivo(`/arquivos/${nome}`);
+  const url = `/arquivos/${nome}`;
+  if (await db.imagemDoForum(url)) {
+    if (!s.admin && !s.cpf) return res.sendStatus(403);
+    return res.sendFile(arquivos.caminhoLocal(nome));
+  }
+  const dono = await db.donoDoArquivo(url);
   if (!dono) return res.sendStatus(404);
   if (!s.admin && s.cpf !== dono) return res.sendStatus(403);
   res.sendFile(arquivos.caminhoLocal(nome));
@@ -272,8 +277,11 @@ app.post('/api/forum/:forum', exigirUsuario, async (req, res) => {
   if (!FORUNS.includes(forum)) return res.status(404).json({ erro: 'Fórum não encontrado.' });
   const titulo = texto(req.body.titulo, 200).trim();
   const corpo = texto(req.body.texto).trim();
-  if (!titulo || !corpo) return res.status(400).json({ erro: 'Escreva o título e a mensagem.' });
-  res.json({ topico: await db.criarTopico({ forum, usuarioId: req.usuario.id, titulo, texto: corpo }) });
+  const imagem = lerArquivo(req.body.imagem, { imagem: true });
+  if (!titulo || (!corpo && !imagem)) return res.status(400).json({ erro: 'Escreva o título e a mensagem.' });
+  res.json({
+    topico: await db.criarTopico({ forum, usuarioId: req.usuario.id, titulo, texto: corpo, imagem: imagem?.url || null }),
+  });
 });
 
 async function carregarTopico(req, res, next) {
@@ -295,13 +303,17 @@ app.get('/api/forum/topico/:id', exigirLeitorForum, carregarTopico, async (req, 
 
 app.post('/api/forum/topico/:id/respostas', exigirUsuario, carregarTopico, async (req, res) => {
   const corpo = texto(req.body.texto).trim();
-  if (!corpo) return res.status(400).json({ erro: 'Escreva a resposta.' });
-  res.json({ resposta: await db.responder({ topicoId: req.topico.id, usuarioId: req.usuario.id, texto: corpo }) });
+  const imagem = lerArquivo(req.body.imagem, { imagem: true });
+  if (!corpo && !imagem) return res.status(400).json({ erro: 'Escreva a resposta ou envie uma imagem.' });
+  res.json({
+    resposta: await db.responder({ topicoId: req.topico.id, usuarioId: req.usuario.id, texto: corpo, imagem: imagem?.url || null }),
+  });
 });
 
 app.delete('/api/forum/topico/:id', exigirLeitorForum, carregarTopico, async (req, res) => {
   if (!req.admin && req.topico.usuario_id !== req.usuario.id) return res.status(403).json({ erro: 'Só o autor pode apagar.' });
-  await db.excluirTopico(req.topico.id);
+  const imgs = await db.excluirTopico(req.topico.id);
+  await Promise.all(imgs.map((u) => arquivos.remover(u)));
   res.json({ ok: true });
 });
 
@@ -310,7 +322,8 @@ app.delete('/api/forum/resposta/:id', exigirLeitorForum, async (req, res) => {
   const r = Number.isInteger(id) ? await db.resposta(id) : null;
   if (!r) return res.status(404).json({ erro: 'Resposta não encontrada.' });
   if (!req.admin && r.usuario_id !== req.usuario.id) return res.status(403).json({ erro: 'Só o autor pode apagar.' });
-  await db.excluirResposta(id);
+  const imgs = await db.excluirResposta(id);
+  await Promise.all(imgs.map((u) => arquivos.remover(u)));
   res.json({ ok: true });
 });
 

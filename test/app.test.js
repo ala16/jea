@@ -169,6 +169,19 @@ test('fórum: todos leem e publicam nos três fóruns', async () => {
   assert.equal(r.body.topico.texto, 'Como faço o orçamento?');
   assert.equal((await ins(`/api/forum/topico/${topicoEsp}/respostas`, { json: { texto: 'Eu uso uma planilha.' } })).status, 200);
 
+  // Imagem no fórum: qualquer pessoa logada vê
+  const img = await subir(ins, 'img', 'image/png', 'quadro.png');
+  const pdf = await subir(ins, '%PDF', 'application/pdf', 'doc.pdf');
+  assert.equal((await ins(`/api/forum/topico/${topicoEsp}/respostas`, { json: { texto: '', imagem: pdf } })).status, 400);
+  r = await ins(`/api/forum/topico/${topicoEsp}/respostas`, { json: { texto: '', imagem: img } });
+  assert.equal(r.status, 200);
+  const respImg = r.body.resposta.id;
+  assert.equal((await esp(img.url)).status, 200);
+  assert.equal((await cliente()(img.url)).status, 403);
+  assert.equal((await ins(`/api/forum/topico/${topicoEsp}/respostas`, { json: { texto: '  ' } })).status, 400);
+  assert.equal((await ins(`/api/forum/resposta/${respImg}`, { method: 'DELETE' })).status, 200);
+  assert.equal((await esp(img.url)).status, 404);
+
   r = await esp(`/api/forum/topico/${topicoEsp}/respostas`, { json: { texto: 'Por módulo.' } });
   assert.equal(r.status, 200);
   const resp = r.body.resposta.id;
