@@ -19,13 +19,15 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS turmas (
     id SERIAL PRIMARY KEY,
     usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
-    numero TEXT NOT NULL,
+    numero TEXT,
     cidade TEXT NOT NULL,
     sindicato TEXT NOT NULL,
     periodo TEXT NOT NULL,
     criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
   );
   CREATE INDEX IF NOT EXISTS turmas_usuario_idx ON turmas (usuario_id);
+  -- O número da turma deixou de ser pedido; a coluna periodo guarda o horário.
+  ALTER TABLE turmas ALTER COLUMN numero DROP NOT NULL;
 
   CREATE TABLE IF NOT EXISTS modulos (
     id SERIAL PRIMARY KEY,
@@ -85,20 +87,27 @@ module.exports = {
 
   turmasDoUsuario: (usuarioId) =>
     todos(
-      `SELECT t.*, COUNT(m.id)::int AS modulos_enviados,
+      `SELECT t.*, t.periodo AS horario, COUNT(m.id)::int AS modulos_enviados,
               COUNT(m.feedback)::int AS feedbacks
          FROM turmas t LEFT JOIN modulos m ON m.turma_id = t.id
         WHERE t.usuario_id = $1 GROUP BY t.id ORDER BY t.id DESC`,
       [usuarioId]
     ),
 
-  criarTurma: (usuarioId, { numero, cidade, sindicato, periodo }) =>
+  criarTurma: (usuarioId, { cidade, sindicato, horario }) =>
     um(
-      'INSERT INTO turmas (usuario_id, numero, cidade, sindicato, periodo) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-      [usuarioId, numero, cidade, sindicato, periodo]
+      `INSERT INTO turmas (usuario_id, cidade, sindicato, periodo) VALUES ($1, $2, $3, $4)
+       RETURNING *, periodo AS horario`,
+      [usuarioId, cidade, sindicato, horario]
     ),
 
-  turma: (id) => um('SELECT * FROM turmas WHERE id = $1', [id]),
+  turma: (id) => um('SELECT *, periodo AS horario FROM turmas WHERE id = $1', [id]),
+
+  async excluirTurma(id) {
+    const anexos = await todos('SELECT anexo FROM modulos WHERE turma_id = $1 AND anexo IS NOT NULL', [id]);
+    await q('DELETE FROM turmas WHERE id = $1', [id]);
+    return anexos.map((r) => r.anexo);
+  },
 
   modulosDaTurma: (turmaId) => todos('SELECT * FROM modulos WHERE turma_id = $1 ORDER BY numero', [turmaId]),
 
@@ -133,7 +142,7 @@ module.exports = {
 
   todosEnvios: () =>
     todos(
-      `SELECT m.*, t.numero AS turma_numero, t.cidade, t.sindicato, t.periodo,
+      `SELECT m.*, t.cidade, t.sindicato, t.periodo AS horario,
               u.id AS usuario_id, u.nome, u.cpf, u.tipo
          FROM modulos m JOIN turmas t ON t.id = m.turma_id JOIN usuarios u ON u.id = t.usuario_id
         ORDER BY m.atualizado_em DESC`

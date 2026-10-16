@@ -42,7 +42,7 @@ ADMIN_PASSWORD=sua-senha npm start
 ## Funcionalidades
 
 - **Entrada por CPF** (com validação dos dígitos). No primeiro acesso a pessoa informa nome completo, foto opcional e se é especialista ou instrutor.
-- **Painel**: cadastra quantas turmas quiser (número, cidade, sindicato rural, período e horário).
+- **Painel**: cadastra quantas turmas quiser (cidade, sindicato rural e horário).
 - **8 módulos por turma**:
   - Especialista, módulo 1: Planejamento (título, missão, objetivo, metas, valores, visão, cronograma, orçamento) e Expedição do Agro (local, data, objetivo, resultado, foto).
   - Especialista, módulos 2 a 8: texto e anexo.

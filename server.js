@@ -186,13 +186,12 @@ app.get('/api/turmas', exigirUsuario, async (req, res) => {
 
 app.post('/api/turmas', exigirUsuario, async (req, res) => {
   const t = {
-    numero: texto(req.body.numero, 50).trim(),
     cidade: texto(req.body.cidade, 200).trim(),
     sindicato: texto(req.body.sindicato, 200).trim(),
-    periodo: texto(req.body.periodo, 200).trim(),
+    horario: texto(req.body.horario, 200).trim(),
   };
-  if (!t.numero || !t.cidade || !t.sindicato || !t.periodo) {
-    return res.status(400).json({ erro: 'Preencha número, cidade, sindicato rural e período.' });
+  if (!t.cidade || !t.sindicato || !t.horario) {
+    return res.status(400).json({ erro: 'Preencha cidade, sindicato rural e horário.' });
   }
   res.json({ turma: await db.criarTurma(req.usuario.id, t) });
 });
@@ -207,6 +206,12 @@ async function carregarTurma(req, res, next) {
 
 app.get('/api/turmas/:turmaId', exigirUsuario, carregarTurma, async (req, res) => {
   res.json({ turma: req.turma, modulos: await db.modulosDaTurma(req.turma.id) });
+});
+
+app.delete('/api/turmas/:turmaId', exigirUsuario, carregarTurma, async (req, res) => {
+  const anexos = await db.excluirTurma(req.turma.id);
+  await Promise.all(anexos.map((url) => arquivos.remover(url)));
+  res.json({ ok: true });
 });
 
 app.post('/api/turmas/:turmaId/modulos/:numero', exigirUsuario, carregarTurma, async (req, res) => {

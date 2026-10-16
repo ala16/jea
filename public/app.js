@@ -224,9 +224,9 @@ async function telaPainel() {
     <div class="lista-turmas">
       ${turmas.map((t) => `
         <a class="cartao turma" href="#/turma/${t.id}/1">
-          <h3>Turma ${esc(t.numero)}</h3>
-          <div class="meta">${esc(t.cidade)} · ${esc(t.sindicato)}</div>
-          <div class="meta">${esc(t.periodo)}</div>
+          <h3>${esc(t.cidade)}</h3>
+          <div class="meta">${esc(t.sindicato)}</div>
+          <div class="meta">${esc(t.horario)}</div>
           <div class="meta" style="margin-top:8px">${t.modulos_enviados}/8 módulos enviados${t.feedbacks ? ` · ${t.feedbacks} com feedback` : ''}</div>
         </a>`).join('') || '<p class="meta">Você ainda não cadastrou nenhuma turma.</p>'}
     </div>
@@ -234,10 +234,9 @@ async function telaPainel() {
       <h2 style="margin-top:0">Cadastrar nova turma</h2>
       <form id="f">
         <div class="grade">
-          <div><label for="numero">Número da turma</label><input id="numero" name="numero" type="text" maxlength="50" required></div>
           <div><label for="cidade">Cidade</label><input id="cidade" name="cidade" type="text" maxlength="200" required></div>
           <div><label for="sindicato">Sindicato rural</label><input id="sindicato" name="sindicato" type="text" maxlength="200" required></div>
-          <div><label for="periodo">Período e horário</label><input id="periodo" name="periodo" type="text" maxlength="200" placeholder="Ex: Mar a Jun/2026, sábados 8h às 12h" required></div>
+          <div><label for="horario">Horário</label><input id="horario" name="horario" type="text" maxlength="200" placeholder="Ex: sábados, 8h às 12h" required></div>
         </div>
         <div class="erro" id="erro"></div>
         <div class="linha-botoes"><button type="submit">Cadastrar turma</button></div>
@@ -246,12 +245,16 @@ async function telaPainel() {
   const f = document.getElementById('f');
   f.onsubmit = async (e) => {
     e.preventDefault();
+    const botao = f.querySelector('button[type=submit]');
+    if (botao.disabled) return;
+    botao.disabled = true;
     try {
       const { turma } = await api('/api/turmas', { json: Object.fromEntries(new FormData(f)) });
       avisar('Turma cadastrada.');
       ir(`#/turma/${turma.id}/1`);
     } catch (err) {
       document.getElementById('erro').textContent = err.message;
+      botao.disabled = false;
     }
   };
 }
@@ -323,9 +326,12 @@ async function telaTurma(turmaId, numero) {
   const especial = !instrutor && numero === 1;
 
   app.innerHTML = `
-    <p><a href="#/painel">← Minhas turmas</a></p>
-    <h1>Turma ${esc(turma.numero)}</h1>
-    <p class="sub">${esc(turma.cidade)} · ${esc(turma.sindicato)} · ${esc(turma.periodo)}</p>
+    <p style="display:flex;justify-content:space-between;gap:12px">
+      <a href="#/painel">← Minhas turmas</a>
+      <button class="link" id="excluir-turma" style="color:var(--erro)">Excluir turma</button>
+    </p>
+    <h1>Turma de ${esc(turma.cidade)}</h1>
+    <p class="sub">${esc(turma.sindicato)} · ${esc(turma.horario)}</p>
     <nav class="abas">
       ${[1, 2, 3, 4, 5, 6, 7, 8].map((n) => {
         const enviado = modulos.some((x) => x.numero === n);
@@ -345,6 +351,17 @@ async function telaTurma(turmaId, numero) {
         </div>
       </form>
     </div>`;
+
+  document.getElementById('excluir-turma').onclick = async () => {
+    if (!confirm('Excluir esta turma e tudo o que foi enviado nos módulos dela?')) return;
+    try {
+      await api(`/api/turmas/${turma.id}`, { method: 'DELETE' });
+      avisar('Turma excluída.');
+      ir('#/painel');
+    } catch (err) {
+      avisar(err.message);
+    }
+  };
 
   const f = document.getElementById('f');
   f.querySelectorAll('textarea').forEach(contador);
@@ -441,7 +458,7 @@ async function telaAdmin() {
     <h1>Painel admin</h1>
     <p class="sub">${usuarios.length} cadastrados · ${envios.length} módulos enviados</p>
     <div class="filtros">
-      <input id="busca" type="text" placeholder="Buscar por nome, CPF, cidade, turma...">
+      <input id="busca" type="text" placeholder="Buscar por nome, CPF, cidade, sindicato...">
       <select id="tipo"><option value="">Todos os perfis</option><option value="especialista">Especialistas</option><option value="instrutor">Instrutores</option></select>
       <select id="modulo"><option value="">Todos os módulos</option>${[1, 2, 3, 4, 5, 6, 7, 8].map((n) => `<option value="${n}">Módulo ${n}</option>`).join('')}</select>
       <select id="feedback"><option value="">Com e sem feedback</option><option value="nao">Sem feedback</option><option value="sim">Com feedback</option></select>
@@ -474,7 +491,7 @@ async function telaAdmin() {
     if (filtro.feedback === 'sim' && !e.feedback) return false;
     if (filtro.feedback === 'nao' && e.feedback) return false;
     if (filtro.busca) {
-      const alvo = `${e.nome} ${e.cpf} ${e.cidade} ${e.sindicato} ${e.turma_numero}`.toLowerCase();
+      const alvo = `${e.nome} ${e.cpf} ${e.cidade} ${e.sindicato}`.toLowerCase();
       if (!alvo.includes(filtro.busca.toLowerCase().replace(/[.-]/g, '')) && !alvo.includes(filtro.busca.toLowerCase())) return false;
     }
     return true;
@@ -487,7 +504,7 @@ async function telaAdmin() {
         <td><input type="checkbox" data-id="${e.id}" ${selecionados.has(e.id) ? 'checked' : ''}></td>
         <td>${esc(e.nome)}<div class="meta">${esc(mascaraCpf(e.cpf))}</div></td>
         <td>${esc(e.tipo)}</td>
-        <td>${esc(e.turma_numero)}<div class="meta">${esc(e.cidade)} · ${esc(e.sindicato)}</div></td>
+        <td>${esc(e.cidade)}<div class="meta">${esc(e.sindicato)} · ${esc(e.horario)}</div></td>
         <td>${e.numero}</td>
         <td>${esc(formatarData(e.atualizado_em))}</td>
         <td><span class="tag ${e.feedback ? 'sim' : ''}">${e.feedback ? 'sim' : 'não'}</span></td>
