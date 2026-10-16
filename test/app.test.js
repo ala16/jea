@@ -144,7 +144,7 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
   assert.equal((await a(anexo)).status, 404);
 });
 
-test('fórum: todos leem, cada um publica no geral e no seu', async () => {
+test('fórum: todos leem e publicam nos três fóruns', async () => {
   const esp = cliente();
   await esp('/api/entrar', { json: { cpf: '390.533.447-05' } });
   await esp('/api/cadastro', { json: { nome: 'Ana Especialista', tipo: 'especialista' } });
@@ -157,24 +157,23 @@ test('fórum: todos leem, cada um publica no geral e no seu', async () => {
   let r = await esp('/api/forum/especialista', { json: { titulo: 'Dúvida', texto: 'Como faço o orçamento?' } });
   assert.equal(r.status, 200);
   const topicoEsp = r.body.topico.id;
-  assert.equal((await ins('/api/forum/especialista', { json: { titulo: 'x', texto: 'y' } })).status, 403);
-  assert.equal((await esp('/api/forum/instrutor', { json: { titulo: 'x', texto: 'y' } })).status, 403);
+  assert.equal((await esp('/api/forum/instrutor', { json: { titulo: 'Para instrutores', texto: 'y' } })).status, 200);
   assert.equal((await ins('/api/forum/geral', { json: { titulo: 'Oi', texto: 'Olá a todos' } })).status, 200);
   assert.equal((await ins('/api/forum/qualquer')).status, 404);
 
-  // Instrutor lê o fórum dos especialistas, mas não responde
+  // Instrutor lê e publica no fórum dos especialistas
   r = await ins('/api/forum/especialista');
   assert.equal(r.body.topicos.length, 1);
-  assert.equal(r.body.podePublicar, false);
+  assert.equal(r.body.podePublicar, true);
   r = await ins(`/api/forum/topico/${topicoEsp}`);
   assert.equal(r.body.topico.texto, 'Como faço o orçamento?');
-  assert.equal((await ins(`/api/forum/topico/${topicoEsp}/respostas`, { json: { texto: 'z' } })).status, 403);
+  assert.equal((await ins(`/api/forum/topico/${topicoEsp}/respostas`, { json: { texto: 'Eu uso uma planilha.' } })).status, 200);
 
   r = await esp(`/api/forum/topico/${topicoEsp}/respostas`, { json: { texto: 'Por módulo.' } });
   assert.equal(r.status, 200);
   const resp = r.body.resposta.id;
   r = await esp('/api/forum/especialista');
-  assert.equal(r.body.topicos[0].respostas, 1);
+  assert.equal(r.body.topicos[0].respostas, 2);
 
   // Só o autor ou o admin apagam
   assert.equal((await ins(`/api/forum/resposta/${resp}`, { method: 'DELETE' })).status, 403);

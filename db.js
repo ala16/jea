@@ -43,8 +43,7 @@ const SCHEMA = `
     UNIQUE (turma_id, numero)
   );
 
-  -- Fórum: geral, especialista ou instrutor. Todos leem os três;
-  -- cada pessoa publica no geral e no fórum do seu perfil.
+  -- Fórum: geral, especialista ou instrutor. Todos leem e publicam nos três.
   CREATE TABLE IF NOT EXISTS forum_topicos (
     id SERIAL PRIMARY KEY,
     forum TEXT NOT NULL CHECK (forum IN ('geral', 'especialista', 'instrutor')),

@@ -576,8 +576,8 @@ async function telaAdmin() {
 
 const FORUNS = [
   { chave: 'geral', nome: 'Geral', desc: 'Para todos: especialistas e instrutores.' },
-  { chave: 'especialista', nome: 'Especialistas', desc: 'Só especialistas publicam aqui. Todos podem ler.' },
-  { chave: 'instrutor', nome: 'Instrutores', desc: 'Só instrutores publicam aqui. Todos podem ler.' },
+  { chave: 'especialista', nome: 'Especialistas', desc: 'Assuntos dos especialistas. Todos podem ler e participar.' },
+  { chave: 'instrutor', nome: 'Instrutores', desc: 'Assuntos dos instrutores. Todos podem ler e participar.' },
 ];
 
 // Evita que uma tela antiga, que terminou de carregar depois, sobrescreva a atual.
@@ -636,7 +636,7 @@ async function telaForum(chave) {
           <div class="erro" id="erro"></div>
           <div class="linha-botoes"><button type="submit">Publicar</button></div>
         </form>
-      </details>` : leitor.usuario ? '<p class="meta">Você pode ler este fórum, mas só publica no Geral e no fórum do seu perfil.</p>' : ''}
+      </details>` : ''}
     <div class="lista-topicos">
       ${topicos.map((t) => `
         <a class="cartao topico" href="#/forum/topico/${t.id}">
@@ -700,7 +700,7 @@ async function telaTopico(id) {
         <div class="contador"></div>
         <div class="erro" id="erro"></div>
         <div class="linha-botoes"><button type="submit">Responder</button></div>
-      </form>` : leitor.usuario ? '<p class="meta">Você pode ler este fórum, mas só responde no Geral e no fórum do seu perfil.</p>' : ''}`;
+      </form>` : ''}`;
 
   app.onclick = async (ev) => {
     const t = ev.target.closest('[data-apagar-topico]');
