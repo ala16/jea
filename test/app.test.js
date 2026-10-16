@@ -241,6 +241,24 @@ test('avisos: admin publica, cada perfil vê os seus', async () => {
   assert.equal((await adm('/api/avisos')).body.avisos.length, 2);
   assert.equal((await cliente()('/api/avisos')).status, 401);
 
+  // Ciente: só o próprio perfil pode dar, uma vez só; o gestor vê quem deu e quando.
+  const reuniao = (await esp('/api/avisos')).body.avisos[0];
+  assert.equal(reuniao.ciente_em, null);
+  assert.equal((await esp(`/api/avisos/${soInstrutor}/ciente`, { method: 'POST' })).status, 404);
+  assert.equal((await adm(`/api/avisos/${reuniao.id}/ciente`, { method: 'POST' })).status, 401);
+  r = await esp(`/api/avisos/${reuniao.id}/ciente`, { method: 'POST' });
+  assert.equal(r.status, 200);
+  const em = r.body.ciente_em;
+  assert.ok(em);
+  assert.equal((await esp(`/api/avisos/${reuniao.id}/ciente`, { method: 'POST' })).body.ciente_em, em);
+  assert.equal((await esp('/api/avisos')).body.avisos[0].ciente_em, em);
+  assert.equal((await ins('/api/avisos')).body.avisos.find((a) => a.id === reuniao.id).ciente_em, null);
+  const doGestor = (await adm('/api/avisos')).body.avisos.find((a) => a.id === reuniao.id);
+  assert.equal(doGestor.cientes.length, 1);
+  assert.equal(doGestor.cientes[0].tipo, 'especialista');
+  assert.ok(doGestor.cientes[0].nome && doGestor.cientes[0].em);
+  assert.ok(doGestor.total_publico >= 2);
+
   assert.equal((await adm(`/api/admin/avisos/${soInstrutor}`, { method: 'DELETE' })).status, 200);
   assert.equal((await adm(`/api/admin/avisos/${soInstrutor}`, { method: 'DELETE' })).status, 404);
   assert.equal((await ins('/api/avisos')).body.avisos.length, 1);
