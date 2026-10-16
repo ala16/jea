@@ -111,7 +111,40 @@ const SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS mensagens_para_idx ON mensagens (para_id, lida);
   CREATE INDEX IF NOT EXISTS mensagens_de_para_idx ON mensagens (de_id, para_id);
+
+  -- Índices para o volume de 500 inscritos (perfis, painel do gestor e fórum).
+  CREATE INDEX IF NOT EXISTS forum_topicos_usuario_idx ON forum_topicos (usuario_id);
+  CREATE INDEX IF NOT EXISTS forum_respostas_usuario_idx ON forum_respostas (usuario_id);
+  CREATE INDEX IF NOT EXISTS modulos_atualizado_idx ON modulos (atualizado_em DESC);
+  CREATE INDEX IF NOT EXISTS mensagens_para_de_idx ON mensagens (para_id, de_id, id);
+  CREATE INDEX IF NOT EXISTS usuarios_foto_idx ON usuarios (foto);
+  CREATE INDEX IF NOT EXISTS forum_topicos_imagem_idx ON forum_topicos (imagem);
+  CREATE INDEX IF NOT EXISTS forum_respostas_imagem_idx ON forum_respostas (imagem);
 `;
+
+// O esquema só é aplicado quando muda (a versão é o hash do texto). Assim cada nova instância
+// da Vercel não roda ALTER TABLE, que trava a tabela enquanto muita gente usa o sistema.
+const VERSAO = require('crypto').createHash('sha256').update(SCHEMA).digest('hex').slice(0, 16);
+// Vários comandos numa só consulta rodam numa só transação; o lock vale até o fim dela.
+const MIGRAR = `
+  SELECT pg_advisory_xact_lock(7340121);
+  ${SCHEMA}
+  CREATE TABLE IF NOT EXISTS jea_schema (id INTEGER PRIMARY KEY, versao TEXT NOT NULL);
+  INSERT INTO jea_schema (id, versao) VALUES (1, '${VERSAO}')
+    ON CONFLICT (id) DO UPDATE SET versao = excluded.versao;
+`;
+
+async function aplicarEsquema(pool) {
+  const atual = await pool.query('SELECT versao FROM jea_schema WHERE id = 1').catch(() => null);
+  if (atual?.rows[0]?.versao === VERSAO) return;
+  await pool.query(MIGRAR);
+}
+
+// Na Neon, usa o endereço com pooler (PgBouncer), que aceita milhares de conexões;
+// o direto aceita só ~100 e se esgota quando muitas funções abrem ao mesmo tempo.
+function comPooler(url) {
+  return url.replace(/@(ep-[a-z0-9-]+?)(?<!-pooler)(\.[a-z0-9-]+\.aws\.neon\.tech)/i, '@$1-pooler$2');
+}
 
 let pronto;
 
@@ -120,8 +153,15 @@ function conectar() {
   if (url) {
     const { Pool } = require('pg');
     const local = /localhost|127\.0\.0\.1/.test(url);
-    const pool = new Pool({ connectionString: url, max: 3, ssl: local ? false : { rejectUnauthorized: false } });
-    return pool.query(SCHEMA).then(() => (sql, params) => pool.query(sql, params));
+    const pool = new Pool({
+      connectionString: comPooler(url),
+      max: 10,
+      idleTimeoutMillis: 10_000,
+      connectionTimeoutMillis: 15_000,
+      ssl: local ? false : { rejectUnauthorized: false },
+    });
+    pool.on('error', (e) => console.warn('[aviso] conexão do banco caiu:', e.message));
+    return aplicarEsquema(pool).then(() => (sql, params) => pool.query(sql, params));
   }
   if (process.env.VERCEL) {
     // Na Vercel o disco é temporário: sem Postgres os dados se perderiam.
@@ -280,6 +320,26 @@ module.exports = {
               (SELECT COUNT(*)::int FROM modulos m JOIN turmas t ON t.id = m.turma_id
                 WHERE t.usuario_id = u.id AND m.feedback IS NULL) AS sem_feedback
          FROM usuarios u ORDER BY u.nome`
+    ),
+
+  // Lista leve para o painel do gestor: sem os textos, que vêm um a um em envio(id).
+  // Com 500 inscritos a lista completa passaria do limite de 4,5MB de resposta da Vercel.
+  listaEnvios: () =>
+    todos(
+      `SELECT m.id, m.turma_id, m.numero, m.atualizado_em, m.feedback, m.feedback_em,
+              t.cidade, t.sindicato, t.periodo AS horario,
+              u.id AS usuario_id, u.nome, u.cpf, u.tipo
+         FROM modulos m JOIN turmas t ON t.id = m.turma_id JOIN usuarios u ON u.id = t.usuario_id
+        ORDER BY m.atualizado_em DESC`
+    ),
+
+  envio: (id) =>
+    um(
+      `SELECT m.*, t.cidade, t.sindicato, t.periodo AS horario,
+              u.id AS usuario_id, u.nome, u.cpf, u.tipo
+         FROM modulos m JOIN turmas t ON t.id = m.turma_id JOIN usuarios u ON u.id = t.usuario_id
+        WHERE m.id = $1`,
+      [id]
     ),
 
   todosEnvios: (usuarioId) =>

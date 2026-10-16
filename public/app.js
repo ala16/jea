@@ -72,7 +72,7 @@ function blocoAnexo(arquivo, nomeOriginal) {
   if (!arquivo) return '';
   const url = esc(arquivo);
   return `<div class="anexo-atual">Arquivo atual: <a href="${url}" target="_blank" rel="noopener">${esc(nomeOriginal || arquivo)}</a>
-    ${ehImagem(arquivo) ? `<img src="${url}" alt="">` : ''}</div>`;
+    ${ehImagem(arquivo) ? `<img src="${url}" alt="" loading="lazy">` : ''}</div>`;
 }
 
 // ---------- upload ----------
@@ -82,8 +82,35 @@ function obterConfig() {
   return (config ??= api('/api/config'));
 }
 
+// Fotos de celular têm 3 a 8MB. Antes de enviar, reduz para no máximo 1600px em JPEG,
+// o que deixa cada uma com uns 300KB: o envio fica rápido e o armazenamento aguenta 500 pessoas.
+const LADO_MAXIMO = 1600;
+async function reduzirImagem(arquivo, ladoMaximo = LADO_MAXIMO) {
+  if (!/^image\/(jpeg|png|webp|heic|heif|bmp)$/.test(arquivo.type) || arquivo.size < 150 * 1024) return arquivo;
+  try {
+    const img = await createImageBitmap(arquivo, { imageOrientation: 'from-image' });
+    const escala = Math.min(1, ladoMaximo / Math.max(img.width, img.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(img.width * escala);
+    canvas.height = Math.round(img.height * escala);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    img.close?.();
+    const blob = await new Promise((ok) => canvas.toBlob(ok, 'image/jpeg', 0.82));
+    if (!blob || blob.size >= arquivo.size) return arquivo;
+    const nome = arquivo.name.replace(/\.[^.]*$/, '') + '.jpg';
+    return new File([blob], nome, { type: 'image/jpeg' });
+  } catch {
+    return arquivo;
+  }
+}
+
 // Envia o arquivo e devolve { url, nome }. Na Vercel vai direto para o Vercel Blob.
-async function enviarArquivo(arquivo, imagem) {
+// Fotos de perfil aparecem pequenas (e 500 de uma vez em Participantes): bastam 400px.
+async function enviarArquivo(arquivo, imagem, ladoMaximo) {
+  if (arquivo.type.startsWith('image/')) arquivo = await reduzirImagem(arquivo, ladoMaximo);
   if (arquivo.size > 5 * 1024 * 1024) throw new Error('Arquivo maior que 5MB.');
   if (imagem && !arquivo.type.startsWith('image/')) throw new Error('O arquivo precisa ser uma imagem.');
   const { uploadDireto } = await obterConfig();
@@ -132,7 +159,7 @@ function desenharTopo(conteudo, inicio = '#/') {
 }
 
 function avatar(foto, classe = '') {
-  return foto ? `<img class="avatar ${classe}" src="${esc(foto)}" alt="">` : `<span class="avatar ${classe}"></span>`;
+  return foto ? `<img class="avatar ${classe}" src="${esc(foto)}" alt="" loading="lazy" decoding="async">` : `<span class="avatar ${classe}"></span>`;
 }
 
 // Ícones do menu (traço simples, herdam a cor do texto).
@@ -355,7 +382,7 @@ async function telaCadastro() {
           email: f.email.value,
           tipo: f.tipo.value,
           redes: lerCamposRedes(f),
-          foto: foto ? await enviarArquivo(foto, true) : null,
+          foto: foto ? await enviarArquivo(foto, true, 400) : null,
         },
       });
       ir('#/painel');
@@ -892,17 +919,32 @@ async function telaAdmin() {
         <td>${esc(formatarData(e.atualizado_em))}</td>
         <td class="col-fb">${caixaFeedbackEnvio(e)}</td>
       </tr>
-      ${abertos.has(e.id) ? `<tr class="detalhe"><td colspan="5">${detalheEnvio(e, false)}</td></tr>` : ''}`).join('')
+      ${abertos.has(e.id) && detalhes.has(e.id) ? `<tr class="detalhe"><td colspan="5">${detalheEnvio(detalhes.get(e.id), false)}</td></tr>` : ''}`).join('')
       || '<tr><td colspan="5" class="meta">Nenhum envio encontrado.</td></tr>';
   }
 
-  corpo.onclick = (ev) => {
+  // A lista vem sem os textos; o conteúdo de cada envio é buscado ao abrir.
+  const detalhes = new Map();
+  corpo.onclick = async (ev) => {
     const ver = ev.target.closest('[data-ver]');
-    if (ver) {
-      const id = Number(ver.dataset.ver);
-      abertos.has(id) ? abertos.delete(id) : abertos.add(id);
-      desenhar();
+    if (!ver) return;
+    const id = Number(ver.dataset.ver);
+    if (abertos.has(id)) {
+      abertos.delete(id);
+      return desenhar();
     }
+    if (!detalhes.has(id)) {
+      ver.disabled = true;
+      ver.textContent = 'abrindo...';
+      try {
+        detalhes.set(id, (await api(`/api/admin/envios/${id}`)).envio);
+      } catch (err) {
+        avisar(err.message);
+        return desenhar();
+      }
+    }
+    abertos.add(id);
+    desenhar();
   };
   for (const k of ['tipo', 'modulo', 'feedback']) {
     document.getElementById(k).onchange = (ev) => { filtro[k] = ev.target.value; desenhar(); };
@@ -998,7 +1040,7 @@ async function telaPerfil() {
       const corpo = {
         nome: f.nome.value,
         email: f.email.value,
-        foto: arq ? await enviarArquivo(arq, true) : null,
+        foto: arq ? await enviarArquivo(arq, true, 400) : null,
         removerFoto: Boolean(f.removerFoto?.checked),
         redes: lerCamposRedes(f),
       };
@@ -1521,7 +1563,7 @@ function autor(item, link = true) {
 }
 
 function imagemForum(url) {
-  return url ? `<a class="imagem-forum" href="${esc(url)}" target="_blank" rel="noopener"><img src="${esc(url)}" alt="Imagem enviada"></a>` : '';
+  return url ? `<a class="imagem-forum" href="${esc(url)}" target="_blank" rel="noopener"><img src="${esc(url)}" alt="Imagem enviada" loading="lazy"></a>` : '';
 }
 
 async function telaForum(chave) {
