@@ -10,11 +10,19 @@ const { MODULO1_ESPECIALISTA_CAMPOS } = require('./public/campos');
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const PRODUCAO = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
-const SESSION_SECRET = process.env.SESSION_SECRET || (PRODUCAO ? null : crypto.randomBytes(32).toString('hex'));
+// Sem SESSION_SECRET, deriva a chave de outro segredo estável do ambiente (banco ou Blob),
+// para o site funcionar na Vercel sem configuração extra.
+const SEGREDO_BASE =
+  process.env.SESSION_SECRET || process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.BLOB_READ_WRITE_TOKEN;
+const SESSION_SECRET = SEGREDO_BASE
+  ? crypto.createHash('sha256').update(`jea-sessao:${SEGREDO_BASE}`).digest('hex')
+  : PRODUCAO
+    ? null
+    : crypto.randomBytes(32).toString('hex');
 const MAX_TEXTO = 2000;
 
 if (!ADMIN_PASSWORD) console.warn('[aviso] ADMIN_PASSWORD não definida: o acesso admin fica desativado.');
-if (!SESSION_SECRET) console.error('[erro] SESSION_SECRET não definida: defina essa variável no ambiente.');
+if (!SESSION_SECRET) console.error('[erro] Banco de dados não configurado: conecte um Postgres (DATABASE_URL).');
 
 // ---------- utilidades ----------
 
@@ -39,6 +47,9 @@ function texto(v, max = MAX_TEXTO) {
 
 // Sessão simples em cookie assinado com HMAC (funciona em serverless, sem estado no servidor).
 function assinar(valor) {
+  if (!SESSION_SECRET) {
+    throw Object.assign(new Error('O banco de dados ainda não foi configurado na Vercel.'), { status: 503 });
+  }
   const mac = crypto.createHmac('sha256', SESSION_SECRET).update(valor).digest('base64url');
   return `${valor}.${mac}`;
 }
@@ -113,7 +124,6 @@ const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
 app.use((req, res, next) => {
-  if (!SESSION_SECRET) return res.status(500).json({ erro: 'Servidor sem SESSION_SECRET configurada.' });
   req.body ??= {};
   next();
 });
@@ -254,7 +264,7 @@ app.post('/api/admin/feedback', exigirAdmin, async (req, res) => {
 });
 
 app.use((err, req, res, next) => {
-  if (err.status && err.status < 500) return res.status(err.status).json({ erro: err.message });
+  if (err.status && (err.status < 500 || err.status === 503)) return res.status(err.status).json({ erro: err.message });
   if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ erro: 'Arquivo maior que 5MB.' });
   console.error(err);
   res.status(500).json({ erro: 'Erro interno.' });
