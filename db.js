@@ -42,6 +42,27 @@ const SCHEMA = `
     feedback_em TIMESTAMPTZ,
     UNIQUE (turma_id, numero)
   );
+
+  -- Fórum: geral, especialista ou instrutor. Todos leem os três;
+  -- cada pessoa publica no geral e no fórum do seu perfil.
+  CREATE TABLE IF NOT EXISTS forum_topicos (
+    id SERIAL PRIMARY KEY,
+    forum TEXT NOT NULL CHECK (forum IN ('geral', 'especialista', 'instrutor')),
+    usuario_id INTEGER REFERENCES usuarios(id) ON DELETE CASCADE,
+    titulo TEXT NOT NULL,
+    texto TEXT NOT NULL,
+    criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS forum_topicos_forum_idx ON forum_topicos (forum, criado_em DESC);
+
+  CREATE TABLE IF NOT EXISTS forum_respostas (
+    id SERIAL PRIMARY KEY,
+    topico_id INTEGER NOT NULL REFERENCES forum_topicos(id) ON DELETE CASCADE,
+    usuario_id INTEGER REFERENCES usuarios(id) ON DELETE CASCADE,
+    texto TEXT NOT NULL,
+    criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS forum_respostas_topico_idx ON forum_respostas (topico_id, criado_em);
 `;
 
 let pronto;
@@ -147,6 +168,57 @@ module.exports = {
          FROM modulos m JOIN turmas t ON t.id = m.turma_id JOIN usuarios u ON u.id = t.usuario_id
         ORDER BY m.atualizado_em DESC`
     ),
+
+  topicos: (forum) =>
+    todos(
+      `SELECT t.id, t.forum, t.titulo, t.criado_em, t.usuario_id,
+              u.nome AS autor, u.tipo AS autor_tipo, u.foto AS autor_foto,
+              COUNT(r.id)::int AS respostas,
+              GREATEST(t.criado_em, MAX(r.criado_em)) AS ultima_atividade
+         FROM forum_topicos t
+         LEFT JOIN usuarios u ON u.id = t.usuario_id
+         LEFT JOIN forum_respostas r ON r.topico_id = t.id
+        WHERE t.forum = $1
+        GROUP BY t.id, u.id
+        ORDER BY ultima_atividade DESC`,
+      [forum]
+    ),
+
+  topico: (id) =>
+    um(
+      `SELECT t.*, u.nome AS autor, u.tipo AS autor_tipo, u.foto AS autor_foto
+         FROM forum_topicos t LEFT JOIN usuarios u ON u.id = t.usuario_id WHERE t.id = $1`,
+      [id]
+    ),
+
+  respostas: (topicoId) =>
+    todos(
+      `SELECT r.*, u.nome AS autor, u.tipo AS autor_tipo, u.foto AS autor_foto
+         FROM forum_respostas r LEFT JOIN usuarios u ON u.id = r.usuario_id
+        WHERE r.topico_id = $1 ORDER BY r.criado_em`,
+      [topicoId]
+    ),
+
+  criarTopico: ({ forum, usuarioId, titulo, texto }) =>
+    um('INSERT INTO forum_topicos (forum, usuario_id, titulo, texto) VALUES ($1, $2, $3, $4) RETURNING id', [
+      forum,
+      usuarioId,
+      titulo,
+      texto,
+    ]),
+
+  responder: ({ topicoId, usuarioId, texto }) =>
+    um('INSERT INTO forum_respostas (topico_id, usuario_id, texto) VALUES ($1, $2, $3) RETURNING id', [
+      topicoId,
+      usuarioId,
+      texto,
+    ]),
+
+  resposta: (id) => um('SELECT * FROM forum_respostas WHERE id = $1', [id]),
+
+  excluirTopico: (id) => q('DELETE FROM forum_topicos WHERE id = $1', [id]),
+
+  excluirResposta: (id) => q('DELETE FROM forum_respostas WHERE id = $1', [id]),
 
   async darFeedback(ids, feedback) {
     const r = await q('UPDATE modulos SET feedback = $1, feedback_em = now() WHERE id = ANY($2::int[])', [feedback, ids]);

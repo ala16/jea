@@ -126,7 +126,13 @@ function desenharTopo(conteudo) {
 
 function topoDoUsuario(u) {
   const foto = u.foto ? `<img class="avatar" src="${esc(u.foto)}" alt="">` : '<span class="avatar"></span>';
-  desenharTopo(`<div class="usuario">${foto}<span>${esc(u.nome)} · ${u.tipo === 'especialista' ? 'Especialista' : 'Instrutor'}</span><button data-sair>Sair</button></div>`);
+  desenharTopo(`<nav class="menu"><a href="#/painel">Minhas turmas</a><a href="#/forum/geral">Fórum</a></nav>
+    <div class="usuario">${foto}<span>${esc(u.nome)} · ${u.tipo === 'especialista' ? 'Especialista' : 'Instrutor'}</span><button data-sair>Sair</button></div>`);
+}
+
+function topoDoAdmin() {
+  desenharTopo(`<nav class="menu"><a href="#/admin">Envios</a><a href="#/forum/geral">Fórum</a></nav>
+    <div class="usuario"><span>Admin</span><button data-sair>Sair</button></div>`);
 }
 
 // ---------- telas ----------
@@ -460,7 +466,7 @@ async function telaAdmin() {
     if (err.status === 401) return telaAdminLogin();
     return telaAdminLogin(err.message);
   }
-  desenharTopo('<div class="usuario"><span>Admin</span><button data-sair>Sair</button></div>');
+  topoDoAdmin();
   const { envios, usuarios } = dados;
   const filtro = { tipo: '', modulo: '', feedback: '', busca: '' };
   const selecionados = new Set();
@@ -566,9 +572,177 @@ async function telaAdmin() {
   desenhar();
 }
 
+// ---------- fórum ----------
+
+const FORUNS = [
+  { chave: 'geral', nome: 'Geral', desc: 'Para todos: especialistas e instrutores.' },
+  { chave: 'especialista', nome: 'Especialistas', desc: 'Só especialistas publicam aqui. Todos podem ler.' },
+  { chave: 'instrutor', nome: 'Instrutores', desc: 'Só instrutores publicam aqui. Todos podem ler.' },
+];
+
+// Evita que uma tela antiga, que terminou de carregar depois, sobrescreva a atual.
+let rotaAtual = 0;
+
+// Quem está vendo o fórum: um usuário cadastrado ou o admin.
+async function leitorDoForum() {
+  const r = await carregarUsuario();
+  if (r?.usuario) {
+    topoDoUsuario(r.usuario);
+    return { usuario: r.usuario };
+  }
+  if (r && !r.usuario) {
+    ir('#/cadastro');
+    return null;
+  }
+  topoDoAdmin();
+  return { admin: true };
+}
+
+function autor(item) {
+  const foto = item.autor_foto ? `<img class="avatar pequeno" src="${esc(item.autor_foto)}" alt="">` : '<span class="avatar pequeno"></span>';
+  const tipo = item.autor_tipo === 'especialista' ? 'Especialista' : item.autor_tipo === 'instrutor' ? 'Instrutor' : '';
+  return `<span class="autor">${foto}<strong>${esc(item.autor || 'Usuário removido')}</strong>${tipo ? `<span class="tag">${tipo}</span>` : ''}</span>`;
+}
+
+async function telaForum(chave) {
+  const forum = FORUNS.find((f) => f.chave === chave) || FORUNS[0];
+  const minhaRota = rotaAtual;
+  const leitor = await leitorDoForum();
+  if (!leitor) return;
+  let dados;
+  try {
+    dados = await api(`/api/forum/${forum.chave}`);
+  } catch (err) {
+    if (err.status === 401) return ir('#/');
+    throw err;
+  }
+  if (minhaRota !== rotaAtual) return;
+  const { topicos, podePublicar } = dados;
+  app.innerHTML = `
+    <h1>Fórum</h1>
+    <nav class="abas">
+      ${FORUNS.map((f) => `<a href="#/forum/${f.chave}" class="${f.chave === forum.chave ? 'ativa' : ''}">${f.nome}</a>`).join('')}
+    </nav>
+    <p class="sub">${esc(forum.desc)}</p>
+    ${podePublicar ? `
+      <details class="cartao novo-topico">
+        <summary>+ Novo tópico em ${esc(forum.nome)}</summary>
+        <form id="f">
+          <label for="titulo">Título</label>
+          <input id="titulo" name="titulo" type="text" maxlength="200" required>
+          <label for="texto">Mensagem</label>
+          <textarea id="texto" name="texto" maxlength="${MAX}" required></textarea>
+          <div class="contador"></div>
+          <div class="erro" id="erro"></div>
+          <div class="linha-botoes"><button type="submit">Publicar</button></div>
+        </form>
+      </details>` : leitor.usuario ? '<p class="meta">Você pode ler este fórum, mas só publica no Geral e no fórum do seu perfil.</p>' : ''}
+    <div class="lista-topicos">
+      ${topicos.map((t) => `
+        <a class="cartao topico" href="#/forum/topico/${t.id}">
+          <h3>${esc(t.titulo)}</h3>
+          <div class="meta">${autor(t)} · ${t.respostas} resposta${t.respostas === 1 ? '' : 's'} · ${esc(formatarData(t.ultima_atividade))}</div>
+        </a>`).join('') || '<p class="meta">Nenhum tópico ainda.</p>'}
+    </div>`;
+  const f = document.getElementById('f');
+  if (!f) return;
+  contador(f.texto);
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const botao = f.querySelector('button[type=submit]');
+    if (botao.disabled) return;
+    botao.disabled = true;
+    try {
+      const { topico } = await api(`/api/forum/${forum.chave}`, { json: { titulo: f.titulo.value, texto: f.texto.value } });
+      ir(`#/forum/topico/${topico.id}`);
+    } catch (err) {
+      document.getElementById('erro').textContent = err.message;
+      botao.disabled = false;
+    }
+  };
+}
+
+async function telaTopico(id) {
+  const minhaRota = rotaAtual;
+  const leitor = await leitorDoForum();
+  if (!leitor) return;
+  let dados;
+  try {
+    dados = await api(`/api/forum/topico/${encodeURIComponent(id)}`);
+  } catch (err) {
+    if (err.status === 401) return ir('#/');
+    avisar(err.message);
+    return ir('#/forum/geral');
+  }
+  if (minhaRota !== rotaAtual) return;
+  const { topico, respostas, podePublicar, usuarioId, admin } = dados;
+  const forum = FORUNS.find((f) => f.chave === topico.forum);
+  const podeApagar = (item) => admin || (usuarioId && item.usuario_id === usuarioId);
+  app.innerHTML = `
+    <p><a href="#/forum/${topico.forum}">← Fórum ${esc(forum.nome)}</a></p>
+    <div class="cartao">
+      <h1>${esc(topico.titulo)}</h1>
+      <div class="meta">${autor(topico)} · ${esc(formatarData(topico.criado_em))}
+        ${podeApagar(topico) ? '<button class="link perigo" data-apagar-topico>apagar tópico</button>' : ''}</div>
+      <div class="mensagem">${esc(topico.texto)}</div>
+    </div>
+    <h2>${respostas.length} resposta${respostas.length === 1 ? '' : 's'}</h2>
+    ${respostas.map((r) => `
+      <div class="cartao resposta">
+        <div class="meta">${autor(r)} · ${esc(formatarData(r.criado_em))}
+          ${podeApagar(r) ? `<button class="link perigo" data-apagar-resposta="${r.id}">apagar</button>` : ''}</div>
+        <div class="mensagem">${esc(r.texto)}</div>
+      </div>`).join('')}
+    ${podePublicar ? `
+      <form id="f" class="cartao">
+        <label for="texto" style="margin-top:0">Sua resposta</label>
+        <textarea id="texto" name="texto" maxlength="${MAX}" required></textarea>
+        <div class="contador"></div>
+        <div class="erro" id="erro"></div>
+        <div class="linha-botoes"><button type="submit">Responder</button></div>
+      </form>` : leitor.usuario ? '<p class="meta">Você pode ler este fórum, mas só responde no Geral e no fórum do seu perfil.</p>' : ''}`;
+
+  app.onclick = async (ev) => {
+    const t = ev.target.closest('[data-apagar-topico]');
+    const r = ev.target.closest('[data-apagar-resposta]');
+    if (!t && !r) return;
+    if (!confirm(t ? 'Apagar este tópico e todas as respostas?' : 'Apagar esta resposta?')) return;
+    try {
+      if (t) {
+        await api(`/api/forum/topico/${topico.id}`, { method: 'DELETE' });
+        app.onclick = null;
+        return ir(`#/forum/${topico.forum}`);
+      }
+      await api(`/api/forum/resposta/${r.dataset.apagarResposta}`, { method: 'DELETE' });
+      telaTopico(topico.id);
+    } catch (err) {
+      avisar(err.message);
+    }
+  };
+
+  const f = document.getElementById('f');
+  if (!f) return;
+  contador(f.texto);
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const botao = f.querySelector('button[type=submit]');
+    if (botao.disabled) return;
+    botao.disabled = true;
+    try {
+      await api(`/api/forum/topico/${topico.id}/respostas`, { json: { texto: f.texto.value } });
+      telaTopico(topico.id);
+    } catch (err) {
+      document.getElementById('erro').textContent = err.message;
+      botao.disabled = false;
+    }
+  };
+}
+
 // ---------- rotas ----------
 
 async function rotear() {
+  app.onclick = null;
+  rotaAtual++;
   const partes = location.hash.replace(/^#\/?/, '').split('/');
   try {
     switch (partes[0]) {
@@ -577,6 +751,8 @@ async function rotear() {
       case 'painel': return await telaPainel();
       case 'turma': return await telaTurma(partes[1], partes[2]);
       case 'admin': return await telaAdmin();
+      case 'forum':
+        return partes[1] === 'topico' ? await telaTopico(partes[2]) : await telaForum(partes[1]);
       default: return ir('#/');
     }
   } catch (err) {
