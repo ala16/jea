@@ -174,6 +174,14 @@ const ICONES = {
   envios: '<path d="M9 4h6v3H9z"/><path d="M8 5H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2"/><path d="M9 13l2 2 4-4"/>',
 };
 
+const SETA_ESQ = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>';
+const SETA_DIR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
+
+// Link "voltar" no topo das páginas internas.
+function voltar(href, rotulo) {
+  return `<a class="voltar" href="${href}">${SETA_ESQ}<span>${rotulo}</span></a>`;
+}
+
 function itemMenu(href, area, icone, rotulo, badge) {
   return `<a href="${href}" data-area="${area}" title="${rotulo}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONES[icone]}</svg>
@@ -524,7 +532,7 @@ async function telaPainel() {
           <div class="meta">Horário: ${esc(t.horario)}</div>
           ${barraProgresso(t.modulos_enviados)}
           <div class="meta">${t.modulos_enviados} de 8 módulos enviados${t.feedbacks ? ` · <strong class="verde">${t.feedbacks} feedback${t.feedbacks === 1 ? '' : 's'}</strong>` : ''}</div>
-          <span class="abrir">Abrir turma →</span>
+          <span class="abrir">Abrir turma ${SETA_DIR}</span>
         </a>`).join('')}
     </div>
     ${turmas.length ? '' : '<div class="vazio">Você ainda não tem turmas. Clique em <strong>+ Cadastrar nova turma</strong> para começar.</div>'}`;
@@ -636,7 +644,7 @@ async function telaTurma(turmaId, numero) {
   const especial = !instrutor && numero === 1;
 
   app.innerHTML = `
-    <p><a href="#/painel">← Minhas turmas</a></p>
+    ${voltar('#/painel', 'Minhas turmas')}
     <h1>Turma de ${esc(turma.cidade)}</h1>
     <p class="sub">${esc(turma.sindicato)} · Horário: ${esc(turma.horario)}</p>
     <div class="resumo-turma">
@@ -666,8 +674,8 @@ async function telaTurma(turmaId, numero) {
       </form>
     </div>
     <div class="navegacao-modulos">
-      ${numero > 1 ? `<a class="botao secundario" href="#/turma/${turma.id}/${numero - 1}">← Módulo ${numero - 1}</a>` : '<span></span>'}
-      ${numero < 8 ? `<a class="botao secundario" href="#/turma/${turma.id}/${numero + 1}">Módulo ${numero + 1} →</a>` : ''}
+      ${numero > 1 ? `<a class="botao secundario" href="#/turma/${turma.id}/${numero - 1}">${SETA_ESQ}<span>Módulo ${numero - 1}</span></a>` : '<span></span>'}
+      ${numero < 8 ? `<a class="botao secundario" href="#/turma/${turma.id}/${numero + 1}"><span>Módulo ${numero + 1}</span>${SETA_DIR}</a>` : ''}
     </div>
     <div class="zona-perigo">
       <button class="link perigo" id="excluir-turma">Excluir esta turma</button>
@@ -811,7 +819,7 @@ async function telaAdminUsuario(id) {
     </div>`;
 
   app.innerHTML = `
-    <p><a href="#/admin">← Painel do gestor</a></p>
+    ${voltar('#/admin', 'Painel do gestor')}
     <div class="cartao perfil-publico">
       ${avatar(u.foto, 'enorme')}
       <div>
@@ -998,7 +1006,7 @@ async function telaPerfil() {
   const redes = u.redes || {};
   const faltando = [!u.email && 'o seu e-mail', !redes.whatsapp && 'o seu WhatsApp'].filter(Boolean);
   app.innerHTML = `
-    <p><a href="#/painel">← Minhas turmas</a></p>
+    ${voltar('#/painel', 'Minhas turmas')}
     <h1>Meu perfil</h1>
     <p class="sub">Os campos com ${OBRIG} são obrigatórios; o resto é opcional. Seu e-mail e CPF só o gestor vê; o WhatsApp aparece no seu perfil.</p>
     ${faltando.length ? `<p class="alerta-email">Falta ${faltando.join(' e ')}. Preencha abaixo e salve o perfil.</p>` : ''}
@@ -1078,7 +1086,7 @@ async function telaVerPerfil(id) {
   const { perfil, turmas, postagens } = dados;
   const meu = leitor.usuario?.id === perfil.id;
   app.innerHTML = `
-    <p><a href="#/participantes">← Participantes</a></p>
+    ${voltar('#/participantes', 'Participantes')}
     <div class="cartao perfil-publico">
       ${avatar(perfil.foto, 'enorme')}
       <div>
@@ -1204,7 +1212,7 @@ async function telaConversa(id) {
   const { outro, mensagens } = dados;
   api('/api/mensagens/nao-lidas').then(({ total }) => mostrarMensagensNaoLidas(total)).catch(() => {});
   app.innerHTML = `
-    <p><a href="#/mensagens">← Mensagens</a></p>
+    ${voltar('#/mensagens', 'Mensagens')}
     <div class="cabecalho-conversa">
       ${avatar(outro.foto, 'grande')}
       <div><h1><a href="#/perfil/${outro.id}">${esc(outro.nome)}</a></h1><span class="tag">${nomeTipo(outro.tipo)}</span></div>
@@ -1669,7 +1677,7 @@ async function telaTopico(id) {
   const forum = FORUNS.find((f) => f.chave === topico.forum);
   const podeApagar = (item) => admin || (usuarioId && item.usuario_id === usuarioId);
   app.innerHTML = `
-    <p><a href="#/forum/${topico.forum}">← Fórum ${esc(forum.nome)}</a></p>
+    ${voltar(`#/forum/${topico.forum}`, `Fórum ${esc(forum.nome)}`)}
     <div class="cartao">
       <h1>${esc(topico.titulo)}</h1>
       <div class="meta">${autor(topico)} · ${esc(formatarData(topico.criado_em))}

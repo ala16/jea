@@ -354,3 +354,60 @@ main.largo { max-width: 1280px; }
 .secao-form h2 + .ajuda { margin-bottom: 4px; }
 input[disabled] { background: #f3f5f4; color: var(--suave); }
 .alerta-email { background: #fff4e5; border: 1px solid #f0c48a; color: #7a4b00; border-radius: 10px; padding: 10px 14px; margin: 0 0 14px; }
+
+/* ---------- acabamento: links, botões e cartões ---------- */
+:root { --verde-escuro: #17602d; --sombra: 0 1px 2px rgba(16,40,24,.06), 0 1px 3px rgba(16,40,24,.08); }
+:where(a) { color: var(--verde); text-underline-offset: 3px; }
+:where(a:hover) { color: var(--verde-escuro); }
+:focus-visible { outline: 3px solid rgba(31,122,58,.45); outline-offset: 2px; }
+
+/* Voltar: chip discreto com seta, no lugar do link sublinhado roxo. */
+.voltar {
+  display: inline-flex; align-items: center; gap: 4px; margin: 0 0 14px;
+  padding: 6px 14px 6px 8px; border-radius: 999px; border: 1px solid var(--borda); background: #fff;
+  color: var(--suave); font-size: 14px; font-weight: 600; text-decoration: none; box-shadow: var(--sombra);
+  transition: color .15s, border-color .15s, background .15s;
+}
+.voltar svg { width: 18px; height: 18px; flex: none; transition: transform .15s; }
+.voltar:hover { color: var(--verde); border-color: var(--verde); background: var(--verde-claro); }
+.voltar:hover svg { transform: translateX(-2px); }
+.voltar + h1 { margin-top: 2px; }
+
+/* Botões: cantos, transição e estados mais claros. */
+.botao { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.botao svg { width: 18px; height: 18px; flex: none; }
+button, .botao, .botao-grande { transition: background .15s, border-color .15s, color .15s, box-shadow .15s, filter .15s; }
+button:not(.link):not(:disabled):active, .botao:active, .botao-grande:active { transform: translateY(1px); }
+button.secundario:not(:disabled):hover, .botao.secundario:hover { background: var(--verde-claro); filter: none; color: var(--verde-escuro); }
+.link { text-underline-offset: 3px; }
+.link:hover { color: var(--verde-escuro); }
+.link.perigo:hover { color: #8f1c13; }
+.navegacao-modulos { margin-top: 4px; }
+.navegacao-modulos .botao { padding: 10px 16px; }
+
+/* Cartões com leve sombra; os clicáveis sobem um pouco ao passar o mouse. */
+.cartao { border-radius: 12px; box-shadow: var(--sombra); }
+.turma, .topico, .conversa { transition: border-color .15s, box-shadow .15s, transform .15s; }
+.turma:hover, .topico:hover, .conversa:hover { box-shadow: 0 6px 16px rgba(16,40,24,.10); transform: translateY(-1px); }
+.abas a { transition: border-color .15s, color .15s, background .15s; }
+.abas a:not(.ativa):hover { border-color: var(--verde); color: var(--verde); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; }
+  .turma:hover, .topico:hover, .conversa:hover, .voltar:hover svg { transform: none; }
+}
+
+/* Seletor de arquivo com botão no estilo do site. */
+input[type=file]::file-selector-button {
+  margin-right: 12px; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--verde);
+  background: #fff; color: var(--verde); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+  transition: background .15s;
+}
+input[type=file]:hover::file-selector-button { background: var(--verde-claro); }
+input[type=file]:hover { border-color: var(--verde); }
+
+/* Ações de apagar: discretas, sublinhadas só ao passar o mouse. */
+.link.perigo { text-decoration: none; }
+.link.perigo:hover { text-decoration: underline; }
+.turma .abrir { display: inline-flex; align-items: center; gap: 2px; }
+.turma .abrir svg { width: 18px; height: 18px; transition: transform .15s; }
+.turma:hover .abrir svg { transform: translateX(2px); }
