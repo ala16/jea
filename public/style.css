@@ -427,3 +427,12 @@ input[type=file]:hover { border-color: var(--verde); }
 .historico .antes { background: #fdecea; }
 .historico .depois { background: var(--verde-claro); }
 .historico .antes .meta, .historico .depois .meta { display: block; font-size: 12px; }
+
+/* Módulos liberados para envio (painel do gestor) */
+.modulos-liberados summary { cursor: pointer; color: var(--verde); display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.modulos-liberados summary .meta { color: var(--suave); }
+.modulos-liberados fieldset { border: 1px solid var(--borda); border-radius: 8px; padding: 8px 12px 12px; margin: 12px 0 0; }
+.modulos-liberados legend { font-weight: 600; padding: 0 4px; }
+.modulos-liberados .check { display: inline-flex; gap: 6px; align-items: center; margin: 6px 16px 0 0; font-weight: 400; font-size: 14px; }
+.envio-conteudo > .link.perigo { margin: 8px 0 0; }
+.tabela-envios .link.perigo { margin-left: 0; }

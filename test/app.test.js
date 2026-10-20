@@ -431,3 +431,47 @@ test('participantes e mensagens diretas', async () => {
   assert.equal((await a('/api/mensagens')).body.conversas[0].nao_lidas, 1);
   assert.equal((await cliente()('/api/mensagens')).status, 401);
 });
+
+test('gestor: excluir envio, ocultar módulos e excluir pessoa', async () => {
+  const a = cliente();
+  await a('/api/entrar', { json: { cpf: '123.456.780-62' } });
+  const foto = await subir(a, 'fakepng', 'image/png', 'eu.png');
+  await a('/api/cadastro', { json: { redes: { whatsapp: '16999998888' }, email: 'ex@exemplo.com', nome: 'Elisa Exclui', tipo: 'instrutor', foto } });
+  const { turma } = (await a('/api/turmas', { json: { cidade: 'Bauru', sindicato: 'SR Bauru', horario: '08:00 às 12:00' } })).body;
+  const img = await subir(a, 'fakepng', 'image/png', 'aula.png');
+  await a(`/api/turmas/${turma.id}/modulos/1`, { json: { texto: 'aula 1', anexos: [img] } });
+  await a(`/api/turmas/${turma.id}/modulos/1`, { json: { texto: 'aula 1 editada' } });
+  const id = (await a('/api/eu')).body.usuario.id;
+  const adm = cliente();
+  await adm('/api/admin/entrar', { json: { senha: 'segredo' } });
+
+  // Excluir envio: o módulo volta a ficar pendente e pode ser enviado de novo.
+  let envio = (await adm(`/api/admin/usuarios/${id}`)).body.envios[0];
+  assert.equal((await a(`/api/admin/envios/${envio.id}`, { method: 'DELETE' })).status, 401);
+  assert.equal((await adm(`/api/admin/envios/${envio.id}`, { method: 'DELETE' })).status, 200);
+  assert.equal((await adm(`/api/admin/envios/${envio.id}`, { method: 'DELETE' })).status, 404);
+  assert.ok(!fs.existsSync(path.join(tmp, path.basename(img.url))));
+  assert.equal((await a(`/api/turmas/${turma.id}`)).body.modulos.length, 0);
+  assert.equal((await a(`/api/turmas/${turma.id}/modulos/1`, { json: { texto: 'de novo' } })).status, 200);
+
+  // Ocultar módulos: só vale para o perfil escolhido.
+  assert.equal((await a('/api/admin/modulos-ocultos', { json: { instrutor: [3] } })).status, 401);
+  let r = await adm('/api/admin/modulos-ocultos', { json: { instrutor: [3, 4, 4, 9], especialista: [8] } });
+  assert.deepEqual(r.body.ocultos, { especialista: [8], instrutor: [3, 4] });
+  assert.deepEqual((await adm('/api/admin/envios')).body.ocultos, { especialista: [8], instrutor: [3, 4] });
+  assert.deepEqual((await a(`/api/turmas/${turma.id}`)).body.disponiveis, [1, 2, 5, 6, 7, 8]);
+  assert.equal((await a(`/api/turmas/${turma.id}/modulos/3`, { json: { texto: 'x' } })).status, 403);
+  assert.equal((await a(`/api/turmas/${turma.id}/modulos/8`, { json: { texto: 'x' } })).status, 200);
+  r = await adm('/api/admin/modulos-ocultos', { json: {} });
+  assert.deepEqual(r.body.ocultos, { especialista: [], instrutor: [] });
+  assert.equal((await a(`/api/turmas/${turma.id}/modulos/3`, { json: { texto: 'x' } })).status, 200);
+
+  // Excluir pessoa: some com turmas, envios e foto; com o mesmo CPF ela pode se cadastrar de novo.
+  assert.equal((await adm(`/api/admin/usuarios/${id}`, { method: 'DELETE' })).status, 200);
+  assert.equal((await adm(`/api/admin/usuarios/${id}`)).status, 404);
+  assert.equal((await adm(`/api/admin/usuarios/${id}`, { method: 'DELETE' })).status, 404);
+  assert.ok(!fs.existsSync(path.join(tmp, path.basename(foto.url))));
+  assert.ok(!(await adm('/api/admin/envios')).body.envios.some((e) => e.usuario_id === id));
+  r = await a('/api/eu');
+  assert.equal(r.body.usuario, null);
+});
