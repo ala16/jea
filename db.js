@@ -162,6 +162,39 @@ const SCHEMA = `
     numero INTEGER NOT NULL CHECK (numero BETWEEN 1 AND 8),
     PRIMARY KEY (tipo, numero)
   );
+
+  -- Expedições do Agro: 8 por turma do especialista, separadas dos módulos. Ficam na mesma
+  -- tabela (area = 'expedicao') e assim têm o mesmo envio, edição, histórico, feedback e exclusão.
+  ALTER TABLE modulos ADD COLUMN IF NOT EXISTS area TEXT NOT NULL DEFAULT 'modulo';
+  ALTER TABLE modulos DROP CONSTRAINT IF EXISTS modulos_area_check;
+  ALTER TABLE modulos ADD CONSTRAINT modulos_area_check CHECK (area IN ('modulo', 'expedicao'));
+  ALTER TABLE modulos DROP CONSTRAINT IF EXISTS modulos_turma_id_numero_key;
+  CREATE UNIQUE INDEX IF NOT EXISTS modulos_turma_area_numero_idx ON modulos (turma_id, area, numero);
+
+  -- A Expedição do Agro que estava no fim do módulo 1 passa a ser a Expedição 1, com as fotos,
+  -- as datas e o feedback. O módulo 1 fica só com o planejamento. Roda uma vez só: depois disso
+  -- nenhum módulo 1 tem mais as chaves da expedição.
+  INSERT INTO modulos (turma_id, area, numero, dados, anexos, enviado_em, atualizado_em, feedback, feedback_em)
+  SELECT turma_id, 'expedicao', 1,
+         jsonb_build_object('expedicao_local', COALESCE(dados->>'expedicao_local', ''),
+                            'expedicao_data', COALESCE(dados->>'expedicao_data', ''),
+                            'expedicao_objetivo', COALESCE(dados->>'expedicao_objetivo', ''),
+                            'expedicao_resultado', COALESCE(dados->>'expedicao_resultado', '')),
+         anexos, enviado_em, atualizado_em, feedback, feedback_em
+    FROM modulos
+   WHERE area = 'modulo' AND numero = 1 AND dados ?| array['expedicao_local', 'expedicao_data', 'expedicao_objetivo', 'expedicao_resultado']
+     AND (COALESCE(dados->>'expedicao_local', '') <> '' OR COALESCE(dados->>'expedicao_data', '') <> ''
+          OR COALESCE(dados->>'expedicao_objetivo', '') <> '' OR COALESCE(dados->>'expedicao_resultado', '') <> ''
+          OR jsonb_array_length(anexos) > 0)
+  ON CONFLICT (turma_id, area, numero) DO NOTHING;
+  UPDATE modulos SET dados = dados - 'expedicao_local' - 'expedicao_data' - 'expedicao_objetivo' - 'expedicao_resultado',
+         anexos = '[]'
+   WHERE area = 'modulo' AND numero = 1 AND dados ?| array['expedicao_local', 'expedicao_data', 'expedicao_objetivo', 'expedicao_resultado'];
+
+  -- Expedições que o gestor ainda não liberou para os especialistas.
+  CREATE TABLE IF NOT EXISTS expedicoes_ocultas (
+    numero INTEGER PRIMARY KEY CHECK (numero BETWEEN 1 AND 8)
+  );
 `;
 
 // O esquema só é aplicado quando muda (a versão é o hash do texto). Assim cada nova instância
@@ -258,7 +291,7 @@ module.exports = {
   turmasPublicas: (usuarioId) =>
     todos(
       `SELECT t.id, t.cidade, t.sindicato, t.periodo AS horario, COUNT(m.id)::int AS modulos_enviados
-         FROM turmas t LEFT JOIN modulos m ON m.turma_id = t.id
+         FROM turmas t LEFT JOIN modulos m ON m.turma_id = t.id AND m.area = 'modulo'
         WHERE t.usuario_id = $1 GROUP BY t.id ORDER BY t.id DESC`,
       [usuarioId]
     ),
@@ -308,7 +341,9 @@ module.exports = {
 
   turmasDoUsuario: (usuarioId) =>
     todos(
-      `SELECT t.*, t.periodo AS horario, COUNT(m.id)::int AS modulos_enviados,
+      `SELECT t.*, t.periodo AS horario,
+              COUNT(m.id) FILTER (WHERE m.area = 'modulo')::int AS modulos_enviados,
+              COUNT(m.id) FILTER (WHERE m.area = 'expedicao')::int AS expedicoes_enviadas,
               COUNT(m.feedback)::int AS feedbacks
          FROM turmas t LEFT JOIN modulos m ON m.turma_id = t.id
         WHERE t.usuario_id = $1 GROUP BY t.id ORDER BY t.id DESC`,
@@ -370,6 +405,15 @@ module.exports = {
     return ocultos;
   },
 
+  async expedicoesOcultas() {
+    return (await todos('SELECT numero FROM expedicoes_ocultas ORDER BY numero')).map((r) => r.numero);
+  },
+
+  async definirExpedicoesOcultas(nums) {
+    await q('DELETE FROM expedicoes_ocultas WHERE numero <> ALL($1::int[])', [nums]);
+    await q('INSERT INTO expedicoes_ocultas (numero) SELECT unnest($1::int[]) ON CONFLICT DO NOTHING', [nums]);
+  },
+
   async definirModulosOcultos(ocultos) {
     const linhas = Object.entries(ocultos).flatMap(([tipo, nums]) => nums.map((n) => [tipo, n]));
     const params = [linhas.map((l) => l[0]), linhas.map((l) => l[1])];
@@ -383,25 +427,27 @@ module.exports = {
     );
   },
 
-  modulosDaTurma: (turmaId) =>
+  // Módulos ou expedições (area) já enviados na turma.
+  modulosDaTurma: (turmaId, area = 'modulo') =>
     todos(
       `SELECT m.*, (SELECT COUNT(*)::int FROM modulos_edicoes e WHERE e.modulo_id = m.id) AS edicoes
-         FROM modulos m WHERE m.turma_id = $1 ORDER BY m.numero`,
-      [turmaId]
+         FROM modulos m WHERE m.turma_id = $1 AND m.area = $2 ORDER BY m.numero`,
+      [turmaId, area]
     ),
 
-  modulo: (turmaId, numero) => um('SELECT * FROM modulos WHERE turma_id = $1 AND numero = $2', [turmaId, numero]),
+  modulo: (turmaId, area, numero) =>
+    um('SELECT * FROM modulos WHERE turma_id = $1 AND area = $2 AND numero = $3', [turmaId, area, numero]),
 
-  // Primeiro envio cria o módulo; uma edição guarda antes a versão anterior no histórico.
-  async salvarModulo(turmaId, numero, { dados, texto, anexos }, anterior) {
+  // Primeiro envio cria o módulo (ou a expedição); uma edição guarda antes a versão anterior no histórico.
+  async salvarModulo(turmaId, area, numero, { dados, texto, anexos }, anterior) {
     const valores = [dados ? JSON.stringify(dados) : null, texto, JSON.stringify(anexos)];
     if (!anterior) {
       return um(
-        `INSERT INTO modulos (turma_id, numero, dados, texto, anexos, enviado_em) VALUES ($1, $2, $3, $4, $5, now())
-         ON CONFLICT (turma_id, numero) DO UPDATE SET
+        `INSERT INTO modulos (turma_id, area, numero, dados, texto, anexos, enviado_em) VALUES ($1, $2, $3, $4, $5, $6, now())
+         ON CONFLICT (turma_id, area, numero) DO UPDATE SET
            dados = excluded.dados, texto = excluded.texto, anexos = excluded.anexos, atualizado_em = now()
          RETURNING *`,
-        [turmaId, numero, ...valores]
+        [turmaId, area, numero, ...valores]
       );
     }
     return um(
@@ -431,7 +477,10 @@ module.exports = {
   todosUsuarios: () =>
     todos(
       `SELECT u.*, (SELECT COUNT(*)::int FROM turmas t WHERE t.usuario_id = u.id) AS turmas,
-              (SELECT COUNT(*)::int FROM modulos m JOIN turmas t ON t.id = m.turma_id WHERE t.usuario_id = u.id) AS envios,
+              (SELECT COUNT(*)::int FROM modulos m JOIN turmas t ON t.id = m.turma_id
+                WHERE t.usuario_id = u.id AND m.area = 'modulo') AS envios,
+              (SELECT COUNT(*)::int FROM modulos m JOIN turmas t ON t.id = m.turma_id
+                WHERE t.usuario_id = u.id AND m.area = 'expedicao') AS expedicoes,
               (SELECT COUNT(*)::int FROM modulos m JOIN turmas t ON t.id = m.turma_id
                 WHERE t.usuario_id = u.id AND m.feedback IS NULL) AS sem_feedback
          FROM usuarios u ORDER BY u.nome`
@@ -441,7 +490,7 @@ module.exports = {
   // Com 500 inscritos a lista completa passaria do limite de 4,5MB de resposta da Vercel.
   listaEnvios: () =>
     todos(
-      `SELECT m.id, m.turma_id, m.numero, m.atualizado_em, m.enviado_em, m.feedback, m.feedback_em,
+      `SELECT m.id, m.turma_id, m.area, m.numero, m.atualizado_em, m.enviado_em, m.feedback, m.feedback_em,
               (SELECT COUNT(*)::int FROM modulos_edicoes e WHERE e.modulo_id = m.id) AS edicoes,
               t.cidade, t.sindicato, t.periodo AS horario,
               u.id AS usuario_id, u.nome, u.cpf, u.tipo
@@ -623,3 +672,4 @@ module.exports = {
     return r.rowCount;
   },
 };
+module.exports.SCHEMA = SCHEMA;

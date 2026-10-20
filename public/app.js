@@ -3,6 +3,16 @@
 const app = document.getElementById('app');
 const topoUsuario = document.getElementById('topo-usuario');
 const CAMPOS = window.MODULO1_ESPECIALISTA_CAMPOS;
+const CAMPOS_EXPEDICAO = window.EXPEDICAO_CAMPOS;
+const AREAS = {
+  modulo: { nome: 'Módulo', plural: 'módulos', rota: '' },
+  expedicao: { nome: 'Expedição', plural: 'expedições', rota: 'expedicao/' },
+};
+
+// "Módulo 3" ou "Expedição 3".
+function nomeEnvio(e) {
+  return `${AREAS[e.area || 'modulo'].nome} ${e.numero}`;
+}
 const MAX = 2000;
 
 // ---------- utilidades ----------
@@ -397,7 +407,7 @@ async function telaCadastro() {
         <input id="cpf" type="text" value="${esc(mascaraCpf(r.cpf))}" disabled>
         <label>Você é ${OBRIG}</label>
         <div class="opcoes">
-          <label><input type="radio" name="tipo" value="especialista" required><span><strong>Especialista</strong><small>Preenche o planejamento e a expedição do agro</small></span></label>
+          <label><input type="radio" name="tipo" value="especialista" required><span><strong>Especialista</strong><small>Preenche o planejamento, os módulos e as 8 expedições do agro</small></span></label>
           <label><input type="radio" name="tipo" value="instrutor" required><span><strong>Instrutor</strong><small>Envia texto e imagem em cada módulo</small></span></label>
         </div>
         <div class="secao-form">
@@ -575,7 +585,7 @@ async function telaPainel() {
           <div class="meta">${esc(t.sindicato)}</div>
           <div class="meta">Horário: ${esc(t.horario)}</div>
           ${barraProgresso(t.modulos_enviados)}
-          <div class="meta">${t.modulos_enviados} de 8 módulos enviados${t.feedbacks ? ` · <strong class="verde">${t.feedbacks} feedback${t.feedbacks === 1 ? '' : 's'}</strong>` : ''}</div>
+          <div class="meta">${t.modulos_enviados} de 8 módulos enviados${u.tipo === 'especialista' ? ` · ${t.expedicoes_enviadas} de 8 expedições` : ''}${t.feedbacks ? ` · <strong class="verde">${t.feedbacks} feedback${t.feedbacks === 1 ? '' : 's'}</strong>` : ''}</div>
           <span class="abrir">Abrir turma ${SETA_DIR}</span>
         </a>`).join('')}
     </div>
@@ -635,24 +645,18 @@ function campoTexto({ chave, rotulo, ajuda, linha, max }, valor) {
 
 function formModulo1Especialista(m) {
   const dados = m?.dados || {};
-  let html = '';
-  let aberto = false;
-  for (const c of CAMPOS) {
-    if (c.grupo) {
-      if (aberto) html += '</div>';
-      html += `<div class="grupo"><h2 style="margin-top:0">${esc(c.grupo)}</h2>`;
-      html += c.ajuda ? `<p class="ajuda">${esc(c.ajuda)}</p>` : '';
-      if (c.grupo === 'Itens que devem constar no Planejamento') {
-        html += '<p class="ajuda">Preencha cada item para estruturar formalmente o Planejamento da sua turma.</p>';
-      }
-      aberto = true;
-      continue;
-    }
-    html += campoTexto(c, dados[c.chave]);
-  }
-  html += campoArquivos('anexos', 'Fotos da expedição', { imagem: true, ajuda: 'Selecione uma ou mais fotos', atuais: m?.anexos });
-  if (aberto) html += '</div>';
-  return html;
+  return `<div class="grupo"><h2 style="margin-top:0">${esc(CAMPOS[0].grupo)}</h2>
+      <p class="ajuda">Preencha cada item para estruturar formalmente o Planejamento da sua turma.</p>
+      ${CAMPOS.filter((c) => c.chave).map((c) => campoTexto(c, dados[c.chave])).join('')}
+      ${campoArquivos('anexos', `Anexos ${OPCIONAL}`, { atuais: m?.anexos })}
+    </div>`;
+}
+
+function formExpedicao(m) {
+  const dados = m?.dados || {};
+  return `<p class="ajuda">Registre os detalhes da expedição realizada pela turma.</p>
+    ${CAMPOS_EXPEDICAO.map((c) => campoTexto(c, dados[c.chave])).join('')}
+    ${campoArquivos('anexos', 'Fotos da expedição', { imagem: true, ajuda: 'Selecione uma ou mais fotos', atuais: m?.anexos })}`;
 }
 
 function formModuloSimples(m, instrutor) {
@@ -661,10 +665,13 @@ function formModuloSimples(m, instrutor) {
     ${campoArquivos('anexos', instrutor ? 'Imagens' : 'Anexos', { imagem: instrutor, atuais: m?.anexos })}`;
 }
 
-// Depois de enviado, o módulo aparece só para leitura; o botão Editar abre o formulário.
-async function telaTurma(turmaId, numero, editando = false) {
+// Depois de enviado, o módulo (ou a expedição) aparece só para leitura; o botão Editar abre o formulário.
+// O especialista tem duas áreas na turma: os 8 módulos e as 8 Expedições do Agro.
+async function telaTurma(turmaId, area, numero, editando = false) {
   const u = await exigirUsuario();
   if (!u) return;
+  const instrutor = u.tipo === 'instrutor';
+  if (instrutor) area = 'modulo';
   numero = Math.min(8, Math.max(1, Number(numero) || 1));
   let r;
   try {
@@ -673,64 +680,74 @@ async function telaTurma(turmaId, numero, editando = false) {
     avisar(err.message);
     return ir('#/painel');
   }
-  const { turma, modulos } = r;
-  const disponiveis = r.disponiveis || [1, 2, 3, 4, 5, 6, 7, 8];
-  // Módulo oculto pelo gestor: abre o primeiro liberado que ainda falta enviar.
+  const { turma } = r;
+  const expedicao = area === 'expedicao';
+  const A = AREAS[area];
+  const enviados = expedicao ? r.expedicoes || [] : r.modulos;
+  const disponiveis = (expedicao ? r.expedicoesDisponiveis : r.disponiveis) || [1, 2, 3, 4, 5, 6, 7, 8];
+  // Oculto pelo gestor: abre o primeiro liberado que ainda falta enviar.
   if (!disponiveis.includes(numero)) {
-    numero = disponiveis.find((n) => !modulos.some((x) => x.numero === n)) ?? disponiveis[0];
+    numero = disponiveis.find((n) => !enviados.some((x) => x.numero === n)) ?? disponiveis[0];
   }
-  const m = modulos.find((x) => x.numero === numero);
-  const instrutor = u.tipo === 'instrutor';
-  const especial = !instrutor && numero === 1;
-  const anteriorMod = disponiveis.filter((n) => n < numero).pop();
-  const proximoMod = disponiveis.find((n) => n > numero);
+  const m = enviados.find((x) => x.numero === numero);
+  const especial = !instrutor && !expedicao && numero === 1;
+  const anterior = disponiveis.filter((n) => n < numero).pop();
+  const proximo = disponiveis.find((n) => n > numero);
+  const link = (n) => `#/turma/${turma.id}/${A.rota}${n}`;
+  const titulo = expedicao ? `Expedição do Agro ${numero}` : `Módulo ${numero}${especial ? ' · Planejamento' : ''}`;
 
   app.innerHTML = `
     ${voltar('#/painel', 'Minhas turmas')}
     <h1>Turma de ${esc(turma.cidade)}</h1>
     <p class="sub">${esc(turma.sindicato)} · Horário: ${esc(turma.horario)}</p>
+    ${instrutor ? '' : `<nav class="abas">
+      <a href="#/turma/${turma.id}/1" class="${expedicao ? '' : 'ativa'}">Módulos <span class="meta">(${r.modulos.length}/8)</span></a>
+      <a href="#/turma/${turma.id}/expedicao/1" class="${expedicao ? 'ativa' : ''}">Expedições do Agro <span class="meta">(${(r.expedicoes || []).length}/8)</span></a>
+    </nav>`}
     <div class="resumo-turma">
-      ${barraProgresso(modulos.length)}
-      <span class="meta">${modulos.length} de 8 módulos enviados</span>
+      ${barraProgresso(enviados.length)}
+      <span class="meta">${enviados.length} de 8 ${A.plural} enviad${expedicao ? 'as' : 'os'}</span>
     </div>
-    <p class="ajuda">Escolha o módulo, preencha e clique em <strong>Enviar módulo</strong>. Depois de enviado, use <strong>Editar envio</strong> para alterar.</p>
-    ${numero === undefined ? '<div class="vazio">Nenhum módulo está liberado para envio no momento. Aguarde o gestor liberar.</div>' : `
+    <p class="ajuda">${expedicao
+      ? 'Aqui ficam as 8 Expedições do Agro da turma. Escolha a expedição, preencha e clique em <strong>Enviar expedição</strong>.'
+      : 'Escolha o módulo, preencha e clique em <strong>Enviar módulo</strong>.'} Depois de enviado, use <strong>Editar envio</strong> para alterar.</p>
+    ${numero === undefined ? `<div class="vazio">Nenhum${expedicao ? 'a expedição' : ' módulo'} está liberad${expedicao ? 'a' : 'o'} para envio no momento. Aguarde o gestor liberar.</div>` : `
     <nav class="modulos">
       ${disponiveis.map((n) => {
-        const x = modulos.find((y) => y.numero === n);
+        const x = enviados.find((y) => y.numero === n);
         const estadoMod = x?.feedback ? 'Com feedback' : x ? 'Enviado' : 'Pendente';
-        return `<a href="#/turma/${turma.id}/${n}" class="${n === numero ? 'ativa' : ''} ${x ? 'enviado' : ''} ${x?.feedback ? 'com-feedback' : ''}">
-          <strong>Módulo ${n}</strong><small>${x ? '✓ ' : ''}${estadoMod}</small></a>`;
+        return `<a href="${link(n)}" class="${n === numero ? 'ativa' : ''} ${x ? 'enviado' : ''} ${x?.feedback ? 'com-feedback' : ''}">
+          <strong>${A.nome} ${n}</strong><small>${x ? '✓ ' : ''}${estadoMod}</small></a>`;
       }).join('')}
     </nav>
     <div class="cartao">
-      <h2 style="margin-top:0">Módulo ${numero}${especial ? ' · Planejamento' : ''}</h2>
+      <h2 style="margin-top:0">${titulo}</h2>
       ${m?.feedback ? `<div class="feedback"><strong>Feedback do gestor (${esc(formatarData(m.feedback_em))}):</strong>\n${esc(m.feedback)}</div>` : ''}
       <p class="meta">${m ? datasEnvio(m) : 'Ainda não enviado.'}</p>
       ${m && !editando ? `
-      <div class="detalhe">${detalheEnvio(m, false)}</div>
+      <div class="detalhe">${detalheEnvio({ ...m, area }, false)}</div>
       <div class="linha-botoes">
         <button type="button" id="editar">Editar envio</button>
       </div>` : `
       <form id="f">
-        ${especial ? formModulo1Especialista(m) : formModuloSimples(m, instrutor)}
+        ${expedicao ? formExpedicao(m) : especial ? formModulo1Especialista(m) : formModuloSimples(m, instrutor)}
         <div class="erro" id="erro"></div>
         <div class="linha-botoes">
-          <button type="submit">${m ? 'Salvar alterações' : 'Enviar módulo'}</button>
+          <button type="submit">${m ? 'Salvar alterações' : expedicao ? 'Enviar expedição' : 'Enviar módulo'}</button>
           ${m ? '<button type="button" class="secundario" id="cancelar">Cancelar</button>' : ''}
         </div>
       </form>`}
     </div>
     <div class="navegacao-modulos">
-      ${anteriorMod ? `<a class="botao secundario" href="#/turma/${turma.id}/${anteriorMod}">${SETA_ESQ}<span>Módulo ${anteriorMod}</span></a>` : '<span></span>'}
-      ${proximoMod ? `<a class="botao secundario" href="#/turma/${turma.id}/${proximoMod}"><span>Módulo ${proximoMod}</span>${SETA_DIR}</a>` : ''}
+      ${anterior ? `<a class="botao secundario" href="${link(anterior)}">${SETA_ESQ}<span>${A.nome} ${anterior}</span></a>` : '<span></span>'}
+      ${proximo ? `<a class="botao secundario" href="${link(proximo)}"><span>${A.nome} ${proximo}</span>${SETA_DIR}</a>` : ''}
     </div>`}
     <div class="zona-perigo">
       <button class="link perigo" id="excluir-turma">Excluir esta turma</button>
     </div>`;
 
   document.getElementById('excluir-turma').onclick = async () => {
-    if (!confirm('Excluir esta turma e tudo o que foi enviado nos módulos dela?')) return;
+    if (!confirm('Excluir esta turma e tudo o que foi enviado nos módulos e expedições dela?')) return;
     try {
       await api(`/api/turmas/${turma.id}`, { method: 'DELETE' });
       avisar('Turma excluída.');
@@ -743,11 +760,11 @@ async function telaTurma(turmaId, numero, editando = false) {
   if (numero === undefined) return;
   const f = document.getElementById('f');
   if (!f) {
-    document.getElementById('editar').onclick = () => telaTurma(turma.id, numero, true);
+    document.getElementById('editar').onclick = () => telaTurma(turma.id, area, numero, true);
     return;
   }
   const cancelar = document.getElementById('cancelar');
-  if (cancelar) cancelar.onclick = () => telaTurma(turma.id, numero);
+  if (cancelar) cancelar.onclick = () => telaTurma(turma.id, area, numero);
   f.querySelectorAll('textarea').forEach(contador);
   f.querySelectorAll('input[type=text]').forEach((i) => {
     const ok = i.parentElement.querySelector('.ok');
@@ -763,15 +780,15 @@ async function telaTurma(turmaId, numero, editando = false) {
       const corpo = {};
       for (const el of f.querySelectorAll('input[type=text], textarea')) corpo[el.name] = el.value;
       corpo.removerAnexos = [...f.querySelectorAll('input[name=removerAnexos]:checked')].map((c) => c.value);
-      corpo.anexos = await enviarArquivos(f.anexos.files, instrutor || especial, botao);
-      await api(`/api/turmas/${turma.id}/modulos/${numero}`, { json: corpo });
-      avisar(m ? `Alterações do módulo ${numero} salvas.` : `Módulo ${numero} enviado.`);
-      telaTurma(turma.id, numero);
+      corpo.anexos = await enviarArquivos(f.anexos.files, instrutor || expedicao, botao);
+      await api(`/api/turmas/${turma.id}/${expedicao ? 'expedicoes' : 'modulos'}/${numero}`, { json: corpo });
+      avisar(m ? `Alterações ${expedicao ? 'da expedição' : 'do módulo'} ${numero} salvas.` : `${A.nome} ${numero} enviad${expedicao ? 'a' : 'o'}.`);
+      telaTurma(turma.id, area, numero);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       document.getElementById('erro').textContent = err.message;
       botao.disabled = false;
-      botao.textContent = m ? 'Salvar alterações' : 'Enviar módulo';
+      botao.textContent = m ? 'Salvar alterações' : expedicao ? 'Enviar expedição' : 'Enviar módulo';
     }
   };
 }
@@ -845,10 +862,11 @@ function ligarFeedbacks(container, envios, depois) {
 
 // Exclusões do gestor: sempre pedem confirmação antes.
 async function excluirEnvio(e) {
-  if (!confirm(`Excluir o envio do módulo ${e.numero} de ${e.nome || 'esta pessoa'}?\n\nO conteúdo, os anexos, o histórico e o feedback são apagados e a pessoa precisará enviar o módulo de novo.`)) return false;
+  const nome = `${e.area === 'expedicao' ? 'da' : 'do'} ${nomeEnvio(e).toLowerCase()}`;
+  if (!confirm(`Excluir o envio ${nome} de ${e.nome || 'esta pessoa'}?\n\nO conteúdo, os anexos, o histórico e o feedback são apagados e a pessoa precisará enviar de novo.`)) return false;
   try {
     await api(`/api/admin/envios/${e.id}`, { method: 'DELETE' });
-    avisar(`Envio do módulo ${e.numero} excluído. A pessoa precisa enviar de novo.`);
+    avisar(`Envio ${nome} excluído. A pessoa precisa enviar de novo.`);
     return true;
   } catch (err) {
     avisar(err.message);
@@ -881,12 +899,13 @@ async function telaAdminUsuario(id) {
   app.classList.add('largo');
   const { usuario: u, turmas, envios } = dados;
   const semFeedback = envios.filter((e) => !e.feedback).length;
+  const modulosEnv = envios.filter((e) => e.area !== 'expedicao').length;
 
   const blocoEnvio = (e) => `
     <div class="cartao envio ${e.feedback ? '' : 'pendente'}">
       <div class="envio-conteudo">
         <div class="envio-topo">
-          <strong>Módulo ${e.numero}</strong>
+          <strong>${nomeEnvio(e)}</strong>
           <span class="meta">${datasEnvio(e)}</span>
         </div>
         <div class="detalhe">${detalheEnvio(e, false)}</div>
@@ -903,19 +922,27 @@ async function telaAdminUsuario(id) {
         <h1>${esc(u.nome)}</h1>
         <span class="tag">${u.tipo === 'especialista' ? 'Especialista' : 'Instrutor'}</span>
         <p class="meta" style="margin:8px 0 0">CPF ${esc(mascaraCpf(u.cpf))}${u.email ? ` · <a href="mailto:${esc(u.email)}">${esc(u.email)}</a>` : ''} · cadastro em ${esc(formatarData(u.criado_em))}</p>
-        <p class="meta" style="margin:0">${turmas.length} turma${turmas.length === 1 ? '' : 's'} · ${envios.length} módulo${envios.length === 1 ? '' : 's'} enviado${envios.length === 1 ? '' : 's'} · ${semFeedback} sem feedback</p>
+        <p class="meta" style="margin:0">${turmas.length} turma${turmas.length === 1 ? '' : 's'} · ${modulosEnv} módulo${modulosEnv === 1 ? '' : 's'} enviado${modulosEnv === 1 ? '' : 's'}${u.tipo === 'especialista' ? ` · ${envios.length - modulosEnv} expedição${envios.length - modulosEnv === 1 ? '' : 'ões'} enviada${envios.length - modulosEnv === 1 ? '' : 's'}` : ''} · ${semFeedback} sem feedback</p>
         ${linksRedes(u.redes)}
       </div>
     </div>
     <div>
         ${turmas.map((t) => {
-          const daTurma = envios.filter((e) => e.turma_id === t.id).sort((a, b) => a.numero - b.numero);
-          const pendentes = [1, 2, 3, 4, 5, 6, 7, 8].filter((n) => !daTurma.some((e) => e.numero === n));
+          const daTurma = (area) => envios.filter((e) => e.turma_id === t.id && (e.area || 'modulo') === area)
+            .sort((a, b) => a.numero - b.numero);
+          const parte = (area) => {
+            const lista = daTurma(area);
+            const { plural } = AREAS[area];
+            const pendentes = [1, 2, 3, 4, 5, 6, 7, 8].filter((n) => !lista.some((e) => e.numero === n));
+            return `${area === 'expedicao' ? '<h3>Expedições do Agro</h3>' : ''}
+              ${barraProgresso(lista.length)}
+              <p class="meta">${lista.length} de 8 ${plural} enviad${area === 'expedicao' ? 'as' : 'os'}${pendentes.length ? ` · pendentes: ${pendentes.join(', ')}` : ''}</p>
+              ${lista.map(blocoEnvio).join('') || `<div class="vazio">Nenhum${area === 'expedicao' ? 'a expedição enviada' : ' módulo enviado'} nesta turma.</div>`}`;
+          };
           return `<section class="turma-ficha">
             <h2>Turma de ${esc(t.cidade)} <span class="meta">${esc(t.sindicato)} · ${esc(t.horario)}</span></h2>
-            ${barraProgresso(daTurma.length)}
-            <p class="meta">${daTurma.length} de 8 módulos enviados${pendentes.length ? ` · pendentes: ${pendentes.join(', ')}` : ''}</p>
-            ${daTurma.map(blocoEnvio).join('') || '<div class="vazio">Nenhum módulo enviado nesta turma.</div>'}
+            ${parte('modulo')}
+            ${u.tipo === 'especialista' ? parte('expedicao') : ''}
           </section>`;
         }).join('') || '<div class="vazio">Esta pessoa ainda não cadastrou turmas.</div>'}
     </div>
@@ -944,14 +971,13 @@ function datasEnvio(e) {
 }
 
 // Campos de um envio como [rótulo, valor], na ordem do formulário.
-function camposEnvio(e) {
+// As versões do histórico não trazem a área: vem do envio atual.
+function camposEnvio(e, area = e.area) {
   const itens = [];
-  if (e.dados) {
-    let grupo = '';
-    for (const c of CAMPOS) {
-      if (c.grupo) grupo = c.grupo;
-      else itens.push([grupo === 'Expedição do Agro' ? `Expedição · ${c.rotulo}` : c.rotulo, e.dados[c.chave]]);
-    }
+  if (area === 'expedicao') {
+    for (const c of CAMPOS_EXPEDICAO) itens.push([c.rotulo, e.dados?.[c.chave]]);
+  } else if (e.dados) {
+    for (const c of CAMPOS) if (c.chave) itens.push([c.rotulo, e.dados[c.chave]]);
   } else {
     itens.push(['Texto', e.texto]);
   }
@@ -965,8 +991,8 @@ function historicoEnvio(e) {
   const versoes = [...hist, e];
   const edicoes = hist.map((antes, i) => {
     const depois = versoes[i + 1];
-    const a = camposEnvio(antes);
-    const d = camposEnvio(depois);
+    const a = camposEnvio(antes, e.area);
+    const d = camposEnvio(depois, e.area);
     const campos = d.filter(([, v], j) => (v || '') !== (a[j]?.[1] || '')).map(([rotulo, v]) => {
       const anterior = a.find(([r]) => r === rotulo)?.[1];
       return `<div class="mudanca"><strong>${esc(rotulo)}</strong>
@@ -1008,6 +1034,7 @@ async function telaAdmin() {
   app.classList.add('largo');
   const { envios, usuarios } = dados;
   const ocultos = dados.ocultos || { especialista: [], instrutor: [] };
+  const expedicoesOcultas = dados.expedicoesOcultas || [];
   const filtro = { tipo: '', modulo: '', feedback: '', busca: '' };
   const abertos = new Set();
 
@@ -1018,31 +1045,38 @@ async function telaAdmin() {
     </div>
     <div class="numeros">
       <div class="cartao"><strong>${usuarios.length}</strong><span>cadastrados</span></div>
-      <div class="cartao"><strong>${envios.length}</strong><span>módulos enviados</span></div>
+      <div class="cartao"><strong>${envios.filter((e) => e.area !== 'expedicao').length}</strong><span>módulos enviados</span></div>
+      <div class="cartao"><strong>${envios.filter((e) => e.area === 'expedicao').length}</strong><span>expedições enviadas</span></div>
       <div class="cartao"><strong>${envios.filter((e) => !e.feedback).length}</strong><span>aguardando feedback</span></div>
     </div>
     <div class="filtros">
       <input id="busca" type="text" placeholder="Buscar por nome, CPF, cidade, sindicato...">
       <select id="tipo"><option value="">Todos os perfis</option><option value="especialista">Especialistas</option><option value="instrutor">Instrutores</option></select>
-      <select id="modulo"><option value="">Todos os módulos</option>${[1, 2, 3, 4, 5, 6, 7, 8].map((n) => `<option value="${n}">Módulo ${n}</option>`).join('')}</select>
+      <select id="modulo"><option value="">Módulos e expedições</option>
+        <option value="modulo">Só módulos</option><option value="expedicao">Só expedições</option>
+        ${['modulo', 'expedicao'].map((a) => `<optgroup label="${a === 'modulo' ? 'Módulos' : 'Expedições do Agro'}">
+          ${[1, 2, 3, 4, 5, 6, 7, 8].map((n) => `<option value="${a}:${n}">${AREAS[a].nome} ${n}</option>`).join('')}</optgroup>`).join('')}</select>
       <select id="feedback"><option value="">Com e sem feedback</option><option value="nao">Sem feedback</option><option value="sim">Com feedback</option></select>
     </div>
     <details class="cartao modulos-liberados" id="liberados">
-      <summary><strong>Módulos liberados para envio</strong>
-        <span class="meta">${['especialista', 'instrutor'].map((t) => `${nomeTipo(t)}: ${8 - ocultos[t].length} de 8`).join(' · ')}</span></summary>
-      <p class="ajuda">Desmarque os módulos que ainda não devem aparecer. Os módulos ocultos somem da tela da turma e não aceitam envio; o que já foi enviado continua guardado.</p>
+      <summary><strong>Módulos e expedições liberados para envio</strong>
+        <span class="meta">${['especialista', 'instrutor'].map((t) => `${nomeTipo(t)}: ${8 - ocultos[t].length} de 8`).join(' · ')} · Expedições: ${8 - expedicoesOcultas.length} de 8</span></summary>
+      <p class="ajuda">Desmarque os módulos e as expedições que ainda não devem aparecer. Os ocultos somem da tela da turma e não aceitam envio; o que já foi enviado continua guardado.</p>
       <form id="f-liberados">
         ${['especialista', 'instrutor'].map((t) => `
           <fieldset><legend>${t === 'especialista' ? 'Especialistas' : 'Instrutores'}</legend>
             ${[1, 2, 3, 4, 5, 6, 7, 8].map((n) => `<label class="check"><input type="checkbox" name="${t}" value="${n}" ${ocultos[t].includes(n) ? '' : 'checked'}> Módulo ${n}</label>`).join('')}
           </fieldset>`).join('')}
-        <div class="linha-botoes"><button type="submit">Salvar módulos liberados</button></div>
+        <fieldset><legend>Expedições do Agro (especialistas)</legend>
+          ${[1, 2, 3, 4, 5, 6, 7, 8].map((n) => `<label class="check"><input type="checkbox" name="expedicao" value="${n}" ${expedicoesOcultas.includes(n) ? '' : 'checked'}> Expedição ${n}</label>`).join('')}
+        </fieldset>
+        <div class="linha-botoes"><button type="submit">Salvar liberados</button></div>
       </form>
     </details>
     <h2>Envios</h2>
     <div class="tabela"><table class="tabela-envios">
       <thead><tr>
-        <th>Nome</th><th>Turma</th><th>Módulo</th><th>Enviado em</th><th class="col-fb">Feedback</th>
+        <th>Nome</th><th>Turma</th><th>Envio</th><th>Enviado em</th><th class="col-fb">Feedback</th>
       </tr></thead>
       <tbody id="corpo"></tbody>
     </table></div>
@@ -1051,7 +1085,7 @@ async function telaAdmin() {
     <div class="tabela"><table>
       <thead><tr><th>Nome</th><th>CPF</th><th>E-mail</th><th>Perfil</th><th>Turmas</th><th>Envios</th><th>Cadastro</th><th></th></tr></thead>
       <tbody id="cadastrados">${usuarios.map((u) => `<tr><td><a href="#/admin/usuario/${u.id}"><strong>${esc(u.nome)}</strong></a></td><td>${esc(mascaraCpf(u.cpf))}</td><td>${u.email ? `<a href="mailto:${esc(u.email)}">${esc(u.email)}</a>` : '<span class="meta">—</span>'}</td><td>${nomeTipo(u.tipo)}</td><td>${u.turmas}</td>
-        <td><strong>${u.envios}</strong> de ${u.turmas * 8}${u.sem_feedback ? `<div class="meta"><span class="tag novo">${u.sem_feedback} sem feedback</span></div>` : ''}</td>
+        <td><strong>${u.envios}</strong> de ${u.turmas * 8}${u.tipo === 'especialista' ? `<div class="meta">${u.expedicoes} de ${u.turmas * 8} expedições</div>` : ''}${u.sem_feedback ? `<div class="meta"><span class="tag novo">${u.sem_feedback} sem feedback</span></div>` : ''}</td>
         <td>${esc(formatarData(u.criado_em))}</td>
         <td><button class="link perigo" data-excluir-usuario="${u.id}">excluir</button></td></tr>`).join('') || '<tr><td colspan="8" class="meta">Ninguém cadastrado ainda.</td></tr>'}</tbody>
     </table></div>`;
@@ -1059,7 +1093,10 @@ async function telaAdmin() {
   const corpo = document.getElementById('corpo');
   const visiveis = () => envios.filter((e) => {
     if (filtro.tipo && e.tipo !== filtro.tipo) return false;
-    if (filtro.modulo && e.numero !== Number(filtro.modulo)) return false;
+    if (filtro.modulo) {
+      const [area, n] = filtro.modulo.split(':');
+      if ((e.area || 'modulo') !== area || (n && e.numero !== Number(n))) return false;
+    }
     if (filtro.feedback === 'sim' && !e.feedback) return false;
     if (filtro.feedback === 'nao' && e.feedback) return false;
     if (filtro.busca) {
@@ -1075,12 +1112,12 @@ async function telaAdmin() {
       <tr class="${e.feedback ? '' : 'sem-fb'}">
         <td><a href="#/admin/usuario/${e.usuario_id}"><strong>${esc(e.nome)}</strong></a><div class="meta">${nomeTipo(e.tipo)}</div></td>
         <td>${esc(e.cidade)}<div class="meta">${esc(e.sindicato)} · ${esc(e.horario)}</div></td>
-        <td><strong>${e.numero}</strong><div><button class="link" data-ver="${e.id}">${abertos.has(e.id) ? 'fechar envio' : 'ver envio'}</button></div>
+        <td><strong>${nomeEnvio(e)}</strong><div><button class="link" data-ver="${e.id}">${abertos.has(e.id) ? 'fechar envio' : 'ver envio'}</button></div>
           <div><button class="link perigo" data-excluir-envio="${e.id}">excluir</button></div></td>
         <td>${esc(formatarData(e.enviado_em || e.atualizado_em))}${e.edicoes ? `<div class="meta"><span class="tag">editado ${e.edicoes === 1 ? '1 vez' : `${e.edicoes} vezes`}</span></div><div class="meta">última em ${esc(formatarData(e.atualizado_em))}</div>` : ''}</td>
         <td class="col-fb">${caixaFeedbackEnvio(e)}</td>
       </tr>
-      ${abertos.has(e.id) && detalhes.has(e.id) ? `<tr class="detalhe"><td colspan="5">${detalheEnvio(detalhes.get(e.id), false)}</td></tr>` : ''}`).join('')
+      ${abertos.has(e.id) && detalhes.has(e.id) ? `<tr class="detalhe"><td colspan="5">${detalheEnvio({ area: e.area, ...detalhes.get(e.id) }, false)}</td></tr>` : ''}`).join('')
       || '<tr><td colspan="5" class="meta">Nenhum envio encontrado.</td></tr>';
   }
 
@@ -1133,10 +1170,12 @@ async function telaAdmin() {
     for (const t of ['especialista', 'instrutor']) {
       corpoOcultos[t] = [...f.querySelectorAll(`input[name=${t}]`)].filter((c) => !c.checked).map((c) => Number(c.value));
     }
+    const expedicoes = [...f.querySelectorAll('input[name=expedicao]')].filter((c) => !c.checked).map((c) => Number(c.value));
     const botao = f.querySelector('button');
     botao.disabled = true;
     try {
       await api('/api/admin/modulos-ocultos', { json: corpoOcultos });
+      await api('/api/admin/expedicoes-ocultas', { json: { ocultas: expedicoes } });
       avisar('Módulos liberados atualizados.');
       await telaAdmin();
       document.getElementById('liberados').open = true;
@@ -1933,7 +1972,9 @@ async function rotear() {
       case '': return await telaInicio();
       case 'cadastro': return await telaCadastro();
       case 'painel': return await telaPainel();
-      case 'turma': return await telaTurma(partes[1], partes[2]);
+      case 'turma': return partes[2] === 'expedicao'
+        ? await telaTurma(partes[1], 'expedicao', partes[3])
+        : await telaTurma(partes[1], 'modulo', partes[2]);
       case 'admin': return partes[1] === 'usuario' ? await telaAdminUsuario(partes[2]) : await telaAdmin();
       case 'avisos': return await telaAvisos();
       case 'material': return await telaMaterial();
