@@ -32,8 +32,11 @@ async function api(url, opcoes = {}) {
     init.body = JSON.stringify(opcoes.json);
   }
   if (init.body && init.method === 'GET') init.method = 'POST';
+  // Login, cadastro, perfil e saída mudam quem está logado: a próxima tela pergunta de novo.
+  if (init.method !== 'GET') sessaoEmCache = null;
   const r = await fetch(url, init);
   const dados = await r.json().catch(() => ({}));
+  if (r.status === 401) sessaoEmCache = null;
   if (!r.ok) {
     const e = new Error(dados.erro || 'Algo deu errado.');
     e.status = r.status;
@@ -174,15 +177,16 @@ async function enviarArquivos(arquivos, imagem, botao) {
 
 let estado = { usuario: null, avisos: Promise.resolve([]) };
 
+// Guarda a resposta de /api/eu entre as telas, para não esperar o servidor a cada clique.
+let sessaoEmCache = null;
+
 async function carregarUsuario() {
-  try {
-    const r = await api('/api/eu');
-    estado.usuario = r.usuario;
-    return r;
-  } catch {
-    estado.usuario = null;
-    return null;
-  }
+  sessaoEmCache ??= api('/api/eu').catch(() => null);
+  const pedido = sessaoEmCache;
+  const r = await pedido;
+  if (!r && sessaoEmCache === pedido) sessaoEmCache = null;
+  estado.usuario = r?.usuario ?? null;
+  return r;
 }
 
 function desenharTopo(conteudo, inicio = '#/') {

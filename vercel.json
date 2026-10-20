@@ -3,6 +3,7 @@
   "framework": null,
   "buildCommand": "",
   "outputDirectory": "public",
+  "regions": ["gru1"],
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api" },
     { "source": "/arquivos/:path*", "destination": "/api" }
@@ -14,6 +15,10 @@
         { "key": "X-Content-Type-Options", "value": "nosniff" },
         { "key": "Referrer-Policy", "value": "same-origin" }
       ]
+    },
+    {
+      "source": "/(vendor/.*|favicon.ico|favicon.png|apple-touch-icon.png)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=86400" }]
     },
     {
       "source": "/(app|campos).js",
