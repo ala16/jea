@@ -116,8 +116,17 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
   assert.deepEqual(r.body.modulo.anexos.map((x) => x.nome), ['exp.jpg', 'exp2.jpg', 'exp3.jpg']);
   r = await a(`/api/turmas/${turmaId}/modulos/1`, { json: { titulo: 'teste 3', removerAnexos: [exp2.url] } });
   assert.deepEqual(r.body.modulo.anexos.map((x) => x.url), [anexo, exp3.url]);
-  assert.equal((await a(exp2.url)).status, 404);
+  // O anexo removido continua guardado na versão anterior, para o histórico do gestor.
+  assert.equal((await a(exp2.url)).status, 200);
   assert.equal((await a(exp3.url)).status, 200);
+
+  // Cada edição guarda a versão anterior; salvar sem mudar nada não conta como edição.
+  r = await a(`/api/turmas/${turmaId}`);
+  const m1 = r.body.modulos.find((m) => m.numero === 1);
+  assert.equal(m1.edicoes, 3);
+  assert.ok(m1.enviado_em < m1.atualizado_em);
+  r = await a(`/api/turmas/${turmaId}/modulos/1`, { json: { titulo: 'teste 3' } });
+  assert.equal((await a(`/api/turmas/${turmaId}`)).body.modulos.find((m) => m.numero === 1).edicoes, 3);
 
   assert.equal((await a(`/api/turmas/${turmaId}/modulos/2`, { json: { texto: 'relato', anexo: pdfA } })).status, 200);
   assert.equal((await a(`/api/turmas/${turmaId}/modulos/9`, { json: {} })).status, 404);
@@ -158,6 +167,16 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
   assert.equal(detalhe.status, 200);
   assert.ok('texto' in detalhe.body.envio && detalhe.body.envio.nome);
   assert.equal((await adm('/api/admin/envios/999999')).status, 404);
+
+  // Histórico de edições para o gestor: as versões anteriores, da mais antiga para a mais nova.
+  const env1 = r.body.envios.find((e) => e.numero === 1 && e.nome === 'Maria da Silva');
+  assert.equal(env1.edicoes, 3);
+  const hist = (await adm(`/api/admin/envios/${env1.id}`)).body.envio.historico;
+  assert.deepEqual(hist.map((h) => h.dados.titulo), ['teste', 'teste 2', 'teste 3']);
+  assert.deepEqual(hist[2].anexos.map((x) => x.url), [anexo, exp2.url, exp3.url]);
+  assert.equal((await adm(exp2.url)).status, 200);
+  assert.equal((await b(exp2.url)).status, 403);
+  assert.equal(r.body.envios.find((e) => e.numero === 2).edicoes, 0);
   assert.equal((await a(`/api/admin/envios/${r.body.envios[0].id}`)).status, 401);
 
   const ids = r.body.envios.map((e) => e.id);
@@ -172,6 +191,8 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
   assert.equal((await a(`/api/turmas/${turmaId}`, { method: 'DELETE' })).status, 200);
   assert.equal((await a('/api/turmas')).body.turmas.length, 0);
   assert.equal((await a(anexo)).status, 404);
+  assert.equal((await a(exp2.url)).status, 404);
+  assert.ok(!fs.existsSync(path.join(tmp, path.basename(exp2.url))));
 });
 
 test('fórum: todos leem e publicam nos três fóruns', async () => {

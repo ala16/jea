@@ -657,7 +657,8 @@ function formModuloSimples(m, instrutor) {
     ${campoArquivos('anexos', instrutor ? 'Imagens' : 'Anexos', { imagem: instrutor, atuais: m?.anexos })}`;
 }
 
-async function telaTurma(turmaId, numero) {
+// Depois de enviado, o módulo aparece só para leitura; o botão Editar abre o formulário.
+async function telaTurma(turmaId, numero, editando = false) {
   const u = await exigirUsuario();
   if (!u) return;
   numero = Math.min(8, Math.max(1, Number(numero) || 1));
@@ -681,7 +682,7 @@ async function telaTurma(turmaId, numero) {
       ${barraProgresso(modulos.length)}
       <span class="meta">${modulos.length} de 8 módulos enviados</span>
     </div>
-    <p class="ajuda">Escolha o módulo, preencha e clique em <strong>Enviar módulo</strong>. Você pode voltar e alterar quando quiser.</p>
+    <p class="ajuda">Escolha o módulo, preencha e clique em <strong>Enviar módulo</strong>. Depois de enviado, use <strong>Editar envio</strong> para alterar.</p>
     <nav class="modulos">
       ${[1, 2, 3, 4, 5, 6, 7, 8].map((n) => {
         const x = modulos.find((y) => y.numero === n);
@@ -693,14 +694,20 @@ async function telaTurma(turmaId, numero) {
     <div class="cartao">
       <h2 style="margin-top:0">Módulo ${numero}${especial ? ' · Planejamento' : ''}</h2>
       ${m?.feedback ? `<div class="feedback"><strong>Feedback do gestor (${esc(formatarData(m.feedback_em))}):</strong>\n${esc(m.feedback)}</div>` : ''}
-      <p class="meta">${m ? `Enviado em ${esc(formatarData(m.atualizado_em))}` : 'Ainda não enviado.'}</p>
+      <p class="meta">${m ? datasEnvio(m) : 'Ainda não enviado.'}</p>
+      ${m && !editando ? `
+      <div class="detalhe">${detalheEnvio(m, false)}</div>
+      <div class="linha-botoes">
+        <button type="button" id="editar">Editar envio</button>
+      </div>` : `
       <form id="f">
         ${especial ? formModulo1Especialista(m) : formModuloSimples(m, instrutor)}
         <div class="erro" id="erro"></div>
         <div class="linha-botoes">
           <button type="submit">${m ? 'Salvar alterações' : 'Enviar módulo'}</button>
+          ${m ? '<button type="button" class="secundario" id="cancelar">Cancelar</button>' : ''}
         </div>
-      </form>
+      </form>`}
     </div>
     <div class="navegacao-modulos">
       ${numero > 1 ? `<a class="botao secundario" href="#/turma/${turma.id}/${numero - 1}">${SETA_ESQ}<span>Módulo ${numero - 1}</span></a>` : '<span></span>'}
@@ -722,6 +729,12 @@ async function telaTurma(turmaId, numero) {
   };
 
   const f = document.getElementById('f');
+  if (!f) {
+    document.getElementById('editar').onclick = () => telaTurma(turma.id, numero, true);
+    return;
+  }
+  const cancelar = document.getElementById('cancelar');
+  if (cancelar) cancelar.onclick = () => telaTurma(turma.id, numero);
   f.querySelectorAll('textarea').forEach(contador);
   f.querySelectorAll('input[type=text]').forEach((i) => {
     const ok = i.parentElement.querySelector('.ok');
@@ -739,7 +752,7 @@ async function telaTurma(turmaId, numero) {
       corpo.removerAnexos = [...f.querySelectorAll('input[name=removerAnexos]:checked')].map((c) => c.value);
       corpo.anexos = await enviarArquivos(f.anexos.files, instrutor || especial, botao);
       await api(`/api/turmas/${turma.id}/modulos/${numero}`, { json: corpo });
-      avisar(`Módulo ${numero} salvo.`);
+      avisar(m ? `Alterações do módulo ${numero} salvas.` : `Módulo ${numero} enviado.`);
       telaTurma(turma.id, numero);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
@@ -836,7 +849,7 @@ async function telaAdminUsuario(id) {
       <div class="envio-conteudo">
         <div class="envio-topo">
           <strong>Módulo ${e.numero}</strong>
-          <span class="meta">Enviado em ${esc(formatarData(e.atualizado_em))}</span>
+          <span class="meta">${datasEnvio(e)}</span>
         </div>
         <div class="detalhe">${detalheEnvio(e, false)}</div>
       </div>
@@ -871,8 +884,17 @@ async function telaAdminUsuario(id) {
   ligarFeedbacks(app, envios);
 }
 
-function detalheEnvio(e, mostrarFeedback = true) {
-  let itens = [];
+// "Enviado em ... · editado 2 vezes, a última em ...".
+function datasEnvio(e) {
+  const enviado = `Enviado em ${esc(formatarData(e.enviado_em || e.atualizado_em))}`;
+  const n = e.edicoes ?? e.historico?.length ?? 0;
+  if (!n) return enviado;
+  return `${enviado} · editado ${n === 1 ? '1 vez' : `${n} vezes`}, a última em ${esc(formatarData(e.atualizado_em))}`;
+}
+
+// Campos de um envio como [rótulo, valor], na ordem do formulário.
+function camposEnvio(e) {
+  const itens = [];
   if (e.dados) {
     let grupo = '';
     for (const c of CAMPOS) {
@@ -882,9 +904,45 @@ function detalheEnvio(e, mostrarFeedback = true) {
   } else {
     itens.push(['Texto', e.texto]);
   }
+  return itens;
+}
+
+// Histórico para o gestor: cada edição mostra o que mudou da versão anterior para a seguinte.
+function historicoEnvio(e) {
+  const hist = e.historico || [];
+  if (!hist.length) return '';
+  const versoes = [...hist, e];
+  const edicoes = hist.map((antes, i) => {
+    const depois = versoes[i + 1];
+    const a = camposEnvio(antes);
+    const d = camposEnvio(depois);
+    const campos = d.filter(([, v], j) => (v || '') !== (a[j]?.[1] || '')).map(([rotulo, v]) => {
+      const anterior = a.find(([r]) => r === rotulo)?.[1];
+      return `<div class="mudanca"><strong>${esc(rotulo)}</strong>
+        <div class="antes"><span class="meta">Antes</span>${esc(anterior) || '<span class="meta">(vazio)</span>'}</div>
+        <div class="depois"><span class="meta">Depois</span>${esc(v) || '<span class="meta">(vazio)</span>'}</div></div>`;
+    });
+    const urlsAntes = new Set((antes.anexos || []).map((x) => x.url));
+    const urlsDepois = new Set((depois.anexos || []).map((x) => x.url));
+    const incluidos = (depois.anexos || []).filter((x) => !urlsAntes.has(x.url));
+    const removidos = (antes.anexos || []).filter((x) => !urlsDepois.has(x.url));
+    if (incluidos.length) campos.push(`<div class="mudanca"><strong>Anexos incluídos</strong>${blocoAnexos(incluidos)}</div>`);
+    if (removidos.length) campos.push(`<div class="mudanca"><strong>Anexos removidos</strong>${blocoAnexos(removidos)}</div>`);
+    const posFeedback = e.feedback_em && new Date(antes.editado_em) > new Date(e.feedback_em);
+    return `<li><div class="meta">Edição de ${esc(formatarData(antes.editado_em))}${posFeedback ? ' · <span class="tag novo">depois do feedback</span>' : ''}</div>
+      ${campos.join('') || '<p class="meta">Sem mudanças no conteúdo.</p>'}</li>`;
+  }).reverse();
+  return `<details class="historico"><summary>Histórico de edições (${hist.length})</summary>
+    <p class="meta">Primeiro envio em ${esc(formatarData(e.enviado_em || hist[0].versao_de))}. Da edição mais recente para a mais antiga.</p>
+    <ol>${edicoes.join('')}</ol></details>`;
+}
+
+function detalheEnvio(e, mostrarFeedback = true) {
+  const itens = camposEnvio(e);
   return `<dl>${itens.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v) || '<span class="meta">(vazio)</span>'}</dd>`).join('')}</dl>
     ${blocoAnexos(e.anexos)}
-    ${mostrarFeedback && e.feedback ? `<div class="feedback" style="margin-top:12px"><strong>Feedback enviado (${esc(formatarData(e.feedback_em))}):</strong>\n${esc(e.feedback)}</div>` : ''}`;
+    ${mostrarFeedback && e.feedback ? `<div class="feedback" style="margin-top:12px"><strong>Feedback enviado (${esc(formatarData(e.feedback_em))}):</strong>\n${esc(e.feedback)}</div>` : ''}
+    ${historicoEnvio(e)}`;
 }
 
 async function telaAdmin() {
@@ -953,7 +1011,7 @@ async function telaAdmin() {
         <td><a href="#/admin/usuario/${e.usuario_id}"><strong>${esc(e.nome)}</strong></a><div class="meta">${nomeTipo(e.tipo)}</div></td>
         <td>${esc(e.cidade)}<div class="meta">${esc(e.sindicato)} · ${esc(e.horario)}</div></td>
         <td><strong>${e.numero}</strong><div><button class="link" data-ver="${e.id}">${abertos.has(e.id) ? 'fechar envio' : 'ver envio'}</button></div></td>
-        <td>${esc(formatarData(e.atualizado_em))}</td>
+        <td>${esc(formatarData(e.enviado_em || e.atualizado_em))}${e.edicoes ? `<div class="meta"><span class="tag">editado ${e.edicoes === 1 ? '1 vez' : `${e.edicoes} vezes`}</span></div><div class="meta">última em ${esc(formatarData(e.atualizado_em))}</div>` : ''}</td>
         <td class="col-fb">${caixaFeedbackEnvio(e)}</td>
       </tr>
       ${abertos.has(e.id) && detalhes.has(e.id) ? `<tr class="detalhe"><td colspan="5">${detalheEnvio(detalhes.get(e.id), false)}</td></tr>` : ''}`).join('')

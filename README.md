@@ -57,6 +57,7 @@ ADMIN_PASSWORD=sua-senha npm start
   - Especialista, módulo 1: Planejamento (título, missão, objetivo, metas, valores, visão, cronograma, orçamento) e Expedição do Agro (local, data, objetivo, resultado, foto).
   - Especialista, módulos 2 a 8: texto e anexo.
   - Instrutor, módulos 1 a 8: texto e imagem.
+  - Depois de enviado, o módulo aparece só para leitura, com o botão **Editar envio**. Cada edição guarda a versão anterior (inclusive os anexos removidos) e o gestor vê o histórico de edições no envio, com o antes e depois de cada campo.
   - Textos com limite de 2000 caracteres e arquivos de até 5MB.
 - **Perfil**: clicando na foto ou no nome no topo, a pessoa edita nome, e-mail, foto e links das redes sociais (WhatsApp, Instagram, Facebook, LinkedIn, site). No fórum, o nome do autor abre o perfil dele.
 - **Participantes**: lista de especialistas e instrutores (filtro por perfil e busca). O perfil mostra as turmas, o progresso e as postagens no fórum, mas não o conteúdo dos módulos.

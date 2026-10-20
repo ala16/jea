@@ -416,3 +416,14 @@ input[type=file]:hover { border-color: var(--verde); }
 .turma .abrir { display: inline-flex; align-items: center; gap: 2px; }
 .turma .abrir svg { width: 18px; height: 18px; transition: transform .15s; }
 .turma:hover .abrir svg { transform: translateX(2px); }
+
+/* Histórico de edições dos envios (gestor) */
+.historico { margin-top: 14px; border: 1px solid var(--borda); border-radius: 8px; padding: 10px 14px; background: var(--fundo); }
+.historico summary { cursor: pointer; font-weight: 600; color: var(--verde); }
+.historico ol { list-style: none; padding: 0; margin: 8px 0 0; }
+.historico li { padding: 10px 0; border-top: 1px solid var(--borda); }
+.historico .mudanca { margin-top: 8px; }
+.historico .antes, .historico .depois { white-space: pre-wrap; padding: 6px 10px; border-radius: 6px; margin-top: 4px; overflow-wrap: anywhere; }
+.historico .antes { background: #fdecea; }
+.historico .depois { background: var(--verde-claro); }
+.historico .antes .meta, .historico .depois .meta { display: block; font-size: 12px; }

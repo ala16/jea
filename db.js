@@ -140,6 +140,21 @@ const SCHEMA = `
   UPDATE forum_topicos SET imagens = jsonb_build_array(imagem), imagem = NULL WHERE imagem IS NOT NULL;
   ALTER TABLE forum_respostas ADD COLUMN IF NOT EXISTS imagens JSONB NOT NULL DEFAULT '[]';
   UPDATE forum_respostas SET imagens = jsonb_build_array(imagem), imagem = NULL WHERE imagem IS NOT NULL;
+
+  -- Histórico de edições dos módulos: cada linha guarda a versão que existia antes da edição.
+  -- enviado_em é o primeiro envio; atualizado_em passa a ser a última edição.
+  ALTER TABLE modulos ADD COLUMN IF NOT EXISTS enviado_em TIMESTAMPTZ;
+  UPDATE modulos SET enviado_em = atualizado_em WHERE enviado_em IS NULL;
+  CREATE TABLE IF NOT EXISTS modulos_edicoes (
+    id SERIAL PRIMARY KEY,
+    modulo_id INTEGER NOT NULL REFERENCES modulos(id) ON DELETE CASCADE,
+    dados JSONB,
+    texto TEXT,
+    anexos JSONB NOT NULL DEFAULT '[]',
+    versao_de TIMESTAMPTZ NOT NULL,
+    editado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS modulos_edicoes_modulo_idx ON modulos_edicoes (modulo_id, id);
 `;
 
 // O esquema só é aplicado quando muda (a versão é o hash do texto). Assim cada nova instância
@@ -304,33 +319,55 @@ module.exports = {
 
   async excluirTurma(id) {
     const anexos = await todos(
-      "SELECT a->>'url' AS url FROM modulos, jsonb_array_elements(anexos) a WHERE turma_id = $1",
+      `SELECT a->>'url' AS url FROM modulos, jsonb_array_elements(anexos) a WHERE turma_id = $1
+       UNION SELECT a->>'url' FROM modulos m JOIN modulos_edicoes e ON e.modulo_id = m.id,
+              jsonb_array_elements(e.anexos) a WHERE m.turma_id = $1`,
       [id]
     );
     await q('DELETE FROM turmas WHERE id = $1', [id]);
     return anexos.map((r) => r.url);
   },
 
-  modulosDaTurma: (turmaId) => todos('SELECT * FROM modulos WHERE turma_id = $1 ORDER BY numero', [turmaId]),
+  modulosDaTurma: (turmaId) =>
+    todos(
+      `SELECT m.*, (SELECT COUNT(*)::int FROM modulos_edicoes e WHERE e.modulo_id = m.id) AS edicoes
+         FROM modulos m WHERE m.turma_id = $1 ORDER BY m.numero`,
+      [turmaId]
+    ),
 
   modulo: (turmaId, numero) => um('SELECT * FROM modulos WHERE turma_id = $1 AND numero = $2', [turmaId, numero]),
 
-  salvarModulo: (turmaId, numero, { dados, texto, anexos }) =>
-    um(
-      `INSERT INTO modulos (turma_id, numero, dados, texto, anexos)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (turma_id, numero) DO UPDATE SET
-         dados = excluded.dados, texto = excluded.texto, anexos = excluded.anexos, atualizado_em = now()
-       RETURNING *`,
-      [turmaId, numero, dados ? JSON.stringify(dados) : null, texto, JSON.stringify(anexos)]
-    ),
+  // Primeiro envio cria o módulo; uma edição guarda antes a versão anterior no histórico.
+  async salvarModulo(turmaId, numero, { dados, texto, anexos }, anterior) {
+    const valores = [dados ? JSON.stringify(dados) : null, texto, JSON.stringify(anexos)];
+    if (!anterior) {
+      return um(
+        `INSERT INTO modulos (turma_id, numero, dados, texto, anexos, enviado_em) VALUES ($1, $2, $3, $4, $5, now())
+         ON CONFLICT (turma_id, numero) DO UPDATE SET
+           dados = excluded.dados, texto = excluded.texto, anexos = excluded.anexos, atualizado_em = now()
+         RETURNING *`,
+        [turmaId, numero, ...valores]
+      );
+    }
+    return um(
+      `WITH h AS (
+         INSERT INTO modulos_edicoes (modulo_id, dados, texto, anexos, versao_de)
+         SELECT id, dados, texto, anexos, atualizado_em FROM modulos WHERE id = $1
+       )
+       UPDATE modulos SET dados = $2, texto = $3, anexos = $4, atualizado_em = now() WHERE id = $1 RETURNING *`,
+      [anterior.id, ...valores]
+    );
+  },
 
   async donoDoArquivo(url) {
     const r = await um(
       `SELECT cpf FROM usuarios WHERE foto = $1
        UNION SELECT u.cpf FROM modulos m JOIN turmas t ON t.id = m.turma_id
               JOIN usuarios u ON u.id = t.usuario_id
-              WHERE m.anexos @> jsonb_build_array(jsonb_build_object('url', $1::text))`,
+              WHERE m.anexos @> jsonb_build_array(jsonb_build_object('url', $1::text))
+       UNION SELECT u.cpf FROM modulos_edicoes e JOIN modulos m ON m.id = e.modulo_id
+              JOIN turmas t ON t.id = m.turma_id JOIN usuarios u ON u.id = t.usuario_id
+              WHERE e.anexos @> jsonb_build_array(jsonb_build_object('url', $1::text))`,
       [url]
     );
     return r?.cpf || null;
@@ -349,7 +386,8 @@ module.exports = {
   // Com 500 inscritos a lista completa passaria do limite de 4,5MB de resposta da Vercel.
   listaEnvios: () =>
     todos(
-      `SELECT m.id, m.turma_id, m.numero, m.atualizado_em, m.feedback, m.feedback_em,
+      `SELECT m.id, m.turma_id, m.numero, m.atualizado_em, m.enviado_em, m.feedback, m.feedback_em,
+              (SELECT COUNT(*)::int FROM modulos_edicoes e WHERE e.modulo_id = m.id) AS edicoes,
               t.cidade, t.sindicato, t.periodo AS horario,
               u.id AS usuario_id, u.nome, u.cpf, u.tipo
          FROM modulos m JOIN turmas t ON t.id = m.turma_id JOIN usuarios u ON u.id = t.usuario_id
@@ -358,7 +396,9 @@ module.exports = {
 
   envio: (id) =>
     um(
-      `SELECT m.*, t.cidade, t.sindicato, t.periodo AS horario,
+      `SELECT m.*,
+              COALESCE((SELECT json_agg(e ORDER BY e.id) FROM modulos_edicoes e WHERE e.modulo_id = m.id), '[]'::json) AS historico,
+              t.cidade, t.sindicato, t.periodo AS horario,
               u.id AS usuario_id, u.nome, u.cpf, u.tipo
          FROM modulos m JOIN turmas t ON t.id = m.turma_id JOIN usuarios u ON u.id = t.usuario_id
         WHERE m.id = $1`,
@@ -367,7 +407,9 @@ module.exports = {
 
   todosEnvios: (usuarioId) =>
     todos(
-      `SELECT m.*, t.cidade, t.sindicato, t.periodo AS horario,
+      `SELECT m.*,
+              COALESCE((SELECT json_agg(e ORDER BY e.id) FROM modulos_edicoes e WHERE e.modulo_id = m.id), '[]'::json) AS historico,
+              t.cidade, t.sindicato, t.periodo AS horario,
               u.id AS usuario_id, u.nome, u.cpf, u.tipo
          FROM modulos m JOIN turmas t ON t.id = m.turma_id JOIN usuarios u ON u.id = t.usuario_id
         ${usuarioId ? 'WHERE u.id = $1' : ''}
