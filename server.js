@@ -318,6 +318,14 @@ app.post('/api/turmas', exigirUsuario, async (req, res) => {
   res.json({ turma: await db.criarTurma(req.usuario.id, t) });
 });
 
+function mudou(antes, depois) {
+  const chaves = new Set([...Object.keys(antes.dados || {}), ...Object.keys(depois.dados || {})]);
+  if ([...chaves].some((k) => (antes.dados?.[k] || '') !== (depois.dados?.[k] || ''))) return true;
+  if ((antes.texto || '') !== (depois.texto || '')) return true;
+  const urls = (l) => (l || []).map((a) => a.url).join('\n');
+  return urls(antes.anexos) !== urls(depois.anexos);
+}
+
 async function carregarTurma(req, res, next) {
   const id = Number(req.params.turmaId);
   const turma = Number.isInteger(id) ? await db.turma(id) : null;
@@ -355,15 +363,18 @@ app.post('/api/turmas/:turmaId/modulos/:numero', exigirUsuario, carregarTurma, a
   }
 
   // Mantém os anexos anteriores, menos os marcados para remover (removerAnexo antigo remove todos).
-  const anterior = (await db.modulo(req.turma.id, numero))?.anexos || [];
+  const salvo = await db.modulo(req.turma.id, numero);
+  const anterior = salvo?.anexos || [];
   const remover = new Set(Array.isArray(req.body.removerAnexos) ? req.body.removerAnexos.map(String) : []);
   const fica = (a) => !req.body.removerAnexo && !remover.has(a.url);
   const anexos = [...anterior.filter(fica), ...novos.filter((n) => !anterior.some((a) => a.url === n.url))];
   if (anexos.length > MAX_ARQUIVOS) return res.status(400).json({ erro: `Cada módulo aceita até ${MAX_ARQUIVOS} arquivos.` });
 
-  const modulo = await db.salvarModulo(req.turma.id, numero, { dados, texto: textoModulo, anexos });
-  await Promise.all(anterior.filter((a) => !fica(a)).map((a) => arquivos.remover(a.url)));
-  res.json({ modulo });
+  // Salvar sem mudar nada não conta como edição. Os anexos removidos numa edição não são
+  // apagados: continuam na versão anterior, que o gestor vê no histórico.
+  const novo = { dados, texto: textoModulo, anexos };
+  if (salvo && !mudou(salvo, novo)) return res.json({ modulo: salvo });
+  res.json({ modulo: await db.salvarModulo(req.turma.id, numero, novo, salvo) });
 });
 
 // Fórum: todos os cadastrados leem e publicam nos três fóruns.
