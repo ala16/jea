@@ -823,9 +823,13 @@ function telaAdminLogin(erro) {
 }
 
 // Caixa de feedback de um envio: cada envio tem a sua.
+// O selo no topo diz se o feedback é de um módulo ou de uma expedição.
 function caixaFeedbackEnvio(e) {
+  const expedicao = e.area === 'expedicao';
+  const alvo = `${expedicao ? 'da' : 'do'} ${nomeEnvio(e)}`;
   return `<form class="fb ${e.feedback ? 'com' : ''}" data-id="${e.id}">
-      <textarea name="feedback" maxlength="${MAX}" placeholder="Escreva o feedback deste envio">${esc(e.feedback || '')}</textarea>
+      <div class="fb-alvo">Feedback ${expedicao ? 'da' : 'do'} <span class="selo-area ${expedicao ? 'expedicao' : 'modulo'}">${expedicao ? 'Expedição do Agro' : 'Módulo'} ${e.numero}</span></div>
+      <textarea name="feedback" maxlength="${MAX}" aria-label="Feedback ${alvo}" placeholder="Escreva o feedback ${alvo.toLowerCase()}">${esc(e.feedback || '')}</textarea>
       <div class="fb-rodape">
         <span class="fb-estado">${e.feedback ? `✓ Enviado em ${esc(formatarData(e.feedback_em))}` : 'Sem feedback'}</span>
         <button type="submit">${e.feedback ? 'Atualizar' : 'Enviar'}</button>

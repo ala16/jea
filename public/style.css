@@ -439,3 +439,7 @@ input[type=file]:hover { border-color: var(--verde); }
 .abas a .meta { font-size: 13px; }
 .abas a.ativa .meta { color: #fff; }
 .turma-ficha h3 { margin: 20px 0 6px; }
+.fb-alvo { font-size: 13px; color: var(--suave); margin-bottom: 4px; }
+.selo-area { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+.selo-area.modulo { background: var(--verde-claro); color: var(--verde); }
+.selo-area.expedicao { background: #fff1d1; color: #8a5300; }
