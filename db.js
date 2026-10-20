@@ -155,6 +155,13 @@ const SCHEMA = `
     editado_em TIMESTAMPTZ NOT NULL DEFAULT now()
   );
   CREATE INDEX IF NOT EXISTS modulos_edicoes_modulo_idx ON modulos_edicoes (modulo_id, id);
+
+  -- Módulos que o gestor ocultou para cada perfil: não aparecem e não aceitam envio.
+  CREATE TABLE IF NOT EXISTS modulos_ocultos (
+    tipo TEXT NOT NULL CHECK (tipo IN ('especialista', 'instrutor')),
+    numero INTEGER NOT NULL CHECK (numero BETWEEN 1 AND 8),
+    PRIMARY KEY (tipo, numero)
+  );
 `;
 
 // O esquema só é aplicado quando muda (a versão é o hash do texto). Assim cada nova instância
@@ -326,6 +333,54 @@ module.exports = {
     );
     await q('DELETE FROM turmas WHERE id = $1', [id]);
     return anexos.map((r) => r.url);
+  },
+
+  // Envio apagado pelo gestor: o módulo volta a ficar pendente e a pessoa envia de novo.
+  async excluirEnvio(id) {
+    const anexos = await todos(
+      `SELECT a->>'url' AS url FROM modulos, jsonb_array_elements(anexos) a WHERE id = $1
+       UNION SELECT a->>'url' FROM modulos_edicoes e, jsonb_array_elements(e.anexos) a WHERE e.modulo_id = $1`,
+      [id]
+    );
+    const r = await q('DELETE FROM modulos WHERE id = $1', [id]);
+    return r.rowCount ? anexos.map((x) => x.url) : null;
+  },
+
+  // Apaga a pessoa e tudo dela (turmas, envios, fórum, mensagens, perguntas) e devolve os arquivos.
+  async excluirUsuario(id) {
+    const arquivos = await todos(
+      `SELECT foto AS url FROM usuarios WHERE id = $1 AND foto IS NOT NULL
+       UNION SELECT a->>'url' FROM modulos m JOIN turmas t ON t.id = m.turma_id, jsonb_array_elements(m.anexos) a
+              WHERE t.usuario_id = $1
+       UNION SELECT a->>'url' FROM modulos_edicoes e JOIN modulos m ON m.id = e.modulo_id JOIN turmas t ON t.id = m.turma_id,
+              jsonb_array_elements(e.anexos) a WHERE t.usuario_id = $1
+       UNION SELECT i FROM forum_topicos, jsonb_array_elements_text(imagens) i WHERE usuario_id = $1
+       UNION SELECT i FROM forum_respostas r JOIN forum_topicos t ON t.id = r.topico_id,
+              jsonb_array_elements_text(r.imagens) i WHERE t.usuario_id = $1 OR r.usuario_id = $1`,
+      [id]
+    );
+    const r = await q('DELETE FROM usuarios WHERE id = $1', [id]);
+    return r.rowCount ? arquivos.map((x) => x.url) : null;
+  },
+
+  // { especialista: [3, 4], instrutor: [] }
+  async modulosOcultos() {
+    const ocultos = { especialista: [], instrutor: [] };
+    for (const r of await todos('SELECT tipo, numero FROM modulos_ocultos ORDER BY numero')) ocultos[r.tipo].push(r.numero);
+    return ocultos;
+  },
+
+  async definirModulosOcultos(ocultos) {
+    const linhas = Object.entries(ocultos).flatMap(([tipo, nums]) => nums.map((n) => [tipo, n]));
+    const params = [linhas.map((l) => l[0]), linhas.map((l) => l[1])];
+    await q(
+      `DELETE FROM modulos_ocultos WHERE (tipo, numero) NOT IN (SELECT * FROM unnest($1::text[], $2::int[]))`,
+      params
+    );
+    await q(
+      `INSERT INTO modulos_ocultos (tipo, numero) SELECT * FROM unnest($1::text[], $2::int[]) ON CONFLICT DO NOTHING`,
+      params
+    );
   },
 
   modulosDaTurma: (turmaId) =>

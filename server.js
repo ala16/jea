@@ -334,8 +334,15 @@ async function carregarTurma(req, res, next) {
   next();
 }
 
+// Módulos que o gestor liberou para o perfil da pessoa.
+async function modulosDisponiveis(tipo) {
+  const ocultos = (await db.modulosOcultos())[tipo];
+  return [1, 2, 3, 4, 5, 6, 7, 8].filter((n) => !ocultos.includes(n));
+}
+
 app.get('/api/turmas/:turmaId', exigirUsuario, carregarTurma, async (req, res) => {
-  res.json({ turma: req.turma, modulos: await db.modulosDaTurma(req.turma.id) });
+  const [modulos, disponiveis] = await Promise.all([db.modulosDaTurma(req.turma.id), modulosDisponiveis(req.usuario.tipo)]);
+  res.json({ turma: req.turma, modulos, disponiveis });
 });
 
 app.delete('/api/turmas/:turmaId', exigirUsuario, carregarTurma, async (req, res) => {
@@ -347,6 +354,9 @@ app.delete('/api/turmas/:turmaId', exigirUsuario, carregarTurma, async (req, res
 app.post('/api/turmas/:turmaId/modulos/:numero', exigirUsuario, carregarTurma, async (req, res) => {
   const numero = Number(req.params.numero);
   if (!(Number.isInteger(numero) && numero >= 1 && numero <= 8)) return res.status(404).json({ erro: 'Módulo inválido.' });
+  if (!(await modulosDisponiveis(req.usuario.tipo)).includes(numero)) {
+    return res.status(403).json({ erro: 'Este módulo não está liberado para envio.' });
+  }
   const instrutor = req.usuario.tipo === 'instrutor';
   const modulo1Especialista = !instrutor && numero === 1;
 
@@ -542,8 +552,37 @@ app.post('/api/admin/entrar', (req, res) => {
 });
 
 app.get('/api/admin/envios', exigirAdmin, async (req, res) => {
-  const [envios, usuarios] = await Promise.all([db.listaEnvios(), db.todosUsuarios()]);
-  res.json({ envios, usuarios });
+  const [envios, usuarios, ocultos] = await Promise.all([db.listaEnvios(), db.todosUsuarios(), db.modulosOcultos()]);
+  res.json({ envios, usuarios, ocultos });
+});
+
+// O gestor escolhe, para cada perfil, quais módulos ficam ocultos (sem envio).
+app.post('/api/admin/modulos-ocultos', exigirAdmin, async (req, res) => {
+  const ocultos = {};
+  for (const tipo of ['especialista', 'instrutor']) {
+    const lista = Array.isArray(req.body[tipo]) ? req.body[tipo].map(Number) : [];
+    ocultos[tipo] = [...new Set(lista.filter((n) => Number.isInteger(n) && n >= 1 && n <= 8))];
+  }
+  await db.definirModulosOcultos(ocultos);
+  res.json({ ocultos: await db.modulosOcultos() });
+});
+
+// Excluir um envio: o módulo volta a ficar pendente e a pessoa precisa enviar de novo.
+app.delete('/api/admin/envios/:id', exigirAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  const anexos = Number.isInteger(id) ? await db.excluirEnvio(id) : null;
+  if (!anexos) return res.status(404).json({ erro: 'Envio não encontrado.' });
+  await Promise.all(anexos.map((url) => arquivos.remover(url)));
+  res.json({ ok: true });
+});
+
+// Excluir uma pessoa com tudo o que ela enviou. Com o mesmo CPF ela pode se cadastrar de novo.
+app.delete('/api/admin/usuarios/:id', exigirAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  const arqs = Number.isInteger(id) ? await db.excluirUsuario(id) : null;
+  if (!arqs) return res.status(404).json({ erro: 'Pessoa não encontrada.' });
+  await Promise.all(arqs.map((url) => arquivos.remover(url)));
+  res.json({ ok: true });
 });
 
 app.get('/api/admin/envios/:id', exigirAdmin, async (req, res) => {

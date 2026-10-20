@@ -670,9 +670,16 @@ async function telaTurma(turmaId, numero, editando = false) {
     return ir('#/painel');
   }
   const { turma, modulos } = r;
+  const disponiveis = r.disponiveis || [1, 2, 3, 4, 5, 6, 7, 8];
+  // Módulo oculto pelo gestor: abre o primeiro liberado que ainda falta enviar.
+  if (!disponiveis.includes(numero)) {
+    numero = disponiveis.find((n) => !modulos.some((x) => x.numero === n)) ?? disponiveis[0];
+  }
   const m = modulos.find((x) => x.numero === numero);
   const instrutor = u.tipo === 'instrutor';
   const especial = !instrutor && numero === 1;
+  const anteriorMod = disponiveis.filter((n) => n < numero).pop();
+  const proximoMod = disponiveis.find((n) => n > numero);
 
   app.innerHTML = `
     ${voltar('#/painel', 'Minhas turmas')}
@@ -683,8 +690,9 @@ async function telaTurma(turmaId, numero, editando = false) {
       <span class="meta">${modulos.length} de 8 módulos enviados</span>
     </div>
     <p class="ajuda">Escolha o módulo, preencha e clique em <strong>Enviar módulo</strong>. Depois de enviado, use <strong>Editar envio</strong> para alterar.</p>
+    ${numero === undefined ? '<div class="vazio">Nenhum módulo está liberado para envio no momento. Aguarde o gestor liberar.</div>' : `
     <nav class="modulos">
-      ${[1, 2, 3, 4, 5, 6, 7, 8].map((n) => {
+      ${disponiveis.map((n) => {
         const x = modulos.find((y) => y.numero === n);
         const estadoMod = x?.feedback ? 'Com feedback' : x ? 'Enviado' : 'Pendente';
         return `<a href="#/turma/${turma.id}/${n}" class="${n === numero ? 'ativa' : ''} ${x ? 'enviado' : ''} ${x?.feedback ? 'com-feedback' : ''}">
@@ -710,9 +718,9 @@ async function telaTurma(turmaId, numero, editando = false) {
       </form>`}
     </div>
     <div class="navegacao-modulos">
-      ${numero > 1 ? `<a class="botao secundario" href="#/turma/${turma.id}/${numero - 1}">${SETA_ESQ}<span>Módulo ${numero - 1}</span></a>` : '<span></span>'}
-      ${numero < 8 ? `<a class="botao secundario" href="#/turma/${turma.id}/${numero + 1}"><span>Módulo ${numero + 1}</span>${SETA_DIR}</a>` : ''}
-    </div>
+      ${anteriorMod ? `<a class="botao secundario" href="#/turma/${turma.id}/${anteriorMod}">${SETA_ESQ}<span>Módulo ${anteriorMod}</span></a>` : '<span></span>'}
+      ${proximoMod ? `<a class="botao secundario" href="#/turma/${turma.id}/${proximoMod}"><span>Módulo ${proximoMod}</span>${SETA_DIR}</a>` : ''}
+    </div>`}
     <div class="zona-perigo">
       <button class="link perigo" id="excluir-turma">Excluir esta turma</button>
     </div>`;
@@ -728,6 +736,7 @@ async function telaTurma(turmaId, numero, editando = false) {
     }
   };
 
+  if (numero === undefined) return;
   const f = document.getElementById('f');
   if (!f) {
     document.getElementById('editar').onclick = () => telaTurma(turma.id, numero, true);
@@ -830,6 +839,31 @@ function ligarFeedbacks(container, envios, depois) {
   };
 }
 
+// Exclusões do gestor: sempre pedem confirmação antes.
+async function excluirEnvio(e) {
+  if (!confirm(`Excluir o envio do módulo ${e.numero} de ${e.nome || 'esta pessoa'}?\n\nO conteúdo, os anexos, o histórico e o feedback são apagados e a pessoa precisará enviar o módulo de novo.`)) return false;
+  try {
+    await api(`/api/admin/envios/${e.id}`, { method: 'DELETE' });
+    avisar(`Envio do módulo ${e.numero} excluído. A pessoa precisa enviar de novo.`);
+    return true;
+  } catch (err) {
+    avisar(err.message);
+    return false;
+  }
+}
+
+async function excluirUsuario(u) {
+  if (!confirm(`Excluir ${u.nome}?\n\nO cadastro, as turmas, todos os envios, as postagens no fórum, as mensagens e as perguntas dessa pessoa são apagados. Não dá para desfazer.`)) return false;
+  try {
+    await api(`/api/admin/usuarios/${u.id}`, { method: 'DELETE' });
+    avisar(`${u.nome} foi excluído(a).`);
+    return true;
+  } catch (err) {
+    avisar(err.message);
+    return false;
+  }
+}
+
 async function telaAdminUsuario(id) {
   let dados;
   try {
@@ -852,6 +886,7 @@ async function telaAdminUsuario(id) {
           <span class="meta">${datasEnvio(e)}</span>
         </div>
         <div class="detalhe">${detalheEnvio(e, false)}</div>
+        <button class="link perigo" data-excluir-envio="${e.id}">excluir envio</button>
       </div>
       ${caixaFeedbackEnvio(e)}
     </div>`;
@@ -879,9 +914,21 @@ async function telaAdminUsuario(id) {
             ${daTurma.map(blocoEnvio).join('') || '<div class="vazio">Nenhum módulo enviado nesta turma.</div>'}
           </section>`;
         }).join('') || '<div class="vazio">Esta pessoa ainda não cadastrou turmas.</div>'}
+    </div>
+    <div class="zona-perigo">
+      <button class="link perigo" id="excluir-usuario">Excluir esta pessoa</button>
     </div>`;
 
   ligarFeedbacks(app, envios);
+  document.getElementById('excluir-usuario').onclick = async () => {
+    if (await excluirUsuario(u)) ir('#/admin');
+  };
+  app.onclick = async (ev) => {
+    const b = ev.target.closest('[data-excluir-envio]');
+    if (!b) return;
+    const e = envios.find((x) => x.id === Number(b.dataset.excluirEnvio));
+    if (await excluirEnvio({ ...e, nome: u.nome })) telaAdminUsuario(u.id);
+  };
 }
 
 // "Enviado em ... · editado 2 vezes, a última em ...".
@@ -956,6 +1003,7 @@ async function telaAdmin() {
   topoDoAdmin();
   app.classList.add('largo');
   const { envios, usuarios } = dados;
+  const ocultos = dados.ocultos || { especialista: [], instrutor: [] };
   const filtro = { tipo: '', modulo: '', feedback: '', busca: '' };
   const abertos = new Set();
 
@@ -975,6 +1023,18 @@ async function telaAdmin() {
       <select id="modulo"><option value="">Todos os módulos</option>${[1, 2, 3, 4, 5, 6, 7, 8].map((n) => `<option value="${n}">Módulo ${n}</option>`).join('')}</select>
       <select id="feedback"><option value="">Com e sem feedback</option><option value="nao">Sem feedback</option><option value="sim">Com feedback</option></select>
     </div>
+    <details class="cartao modulos-liberados" id="liberados">
+      <summary><strong>Módulos liberados para envio</strong>
+        <span class="meta">${['especialista', 'instrutor'].map((t) => `${nomeTipo(t)}: ${8 - ocultos[t].length} de 8`).join(' · ')}</span></summary>
+      <p class="ajuda">Desmarque os módulos que ainda não devem aparecer. Os módulos ocultos somem da tela da turma e não aceitam envio; o que já foi enviado continua guardado.</p>
+      <form id="f-liberados">
+        ${['especialista', 'instrutor'].map((t) => `
+          <fieldset><legend>${t === 'especialista' ? 'Especialistas' : 'Instrutores'}</legend>
+            ${[1, 2, 3, 4, 5, 6, 7, 8].map((n) => `<label class="check"><input type="checkbox" name="${t}" value="${n}" ${ocultos[t].includes(n) ? '' : 'checked'}> Módulo ${n}</label>`).join('')}
+          </fieldset>`).join('')}
+        <div class="linha-botoes"><button type="submit">Salvar módulos liberados</button></div>
+      </form>
+    </details>
     <h2>Envios</h2>
     <div class="tabela"><table class="tabela-envios">
       <thead><tr>
@@ -985,10 +1045,11 @@ async function telaAdmin() {
     <h2>Cadastrados</h2>
     <p class="ajuda">Clique no nome para abrir a ficha da pessoa, com todos os envios.</p>
     <div class="tabela"><table>
-      <thead><tr><th>Nome</th><th>CPF</th><th>E-mail</th><th>Perfil</th><th>Turmas</th><th>Envios</th><th>Cadastro</th></tr></thead>
-      <tbody>${usuarios.map((u) => `<tr><td><a href="#/admin/usuario/${u.id}"><strong>${esc(u.nome)}</strong></a></td><td>${esc(mascaraCpf(u.cpf))}</td><td>${u.email ? `<a href="mailto:${esc(u.email)}">${esc(u.email)}</a>` : '<span class="meta">—</span>'}</td><td>${nomeTipo(u.tipo)}</td><td>${u.turmas}</td>
+      <thead><tr><th>Nome</th><th>CPF</th><th>E-mail</th><th>Perfil</th><th>Turmas</th><th>Envios</th><th>Cadastro</th><th></th></tr></thead>
+      <tbody id="cadastrados">${usuarios.map((u) => `<tr><td><a href="#/admin/usuario/${u.id}"><strong>${esc(u.nome)}</strong></a></td><td>${esc(mascaraCpf(u.cpf))}</td><td>${u.email ? `<a href="mailto:${esc(u.email)}">${esc(u.email)}</a>` : '<span class="meta">—</span>'}</td><td>${nomeTipo(u.tipo)}</td><td>${u.turmas}</td>
         <td><strong>${u.envios}</strong> de ${u.turmas * 8}${u.sem_feedback ? `<div class="meta"><span class="tag novo">${u.sem_feedback} sem feedback</span></div>` : ''}</td>
-        <td>${esc(formatarData(u.criado_em))}</td></tr>`).join('') || '<tr><td colspan="7" class="meta">Ninguém cadastrado ainda.</td></tr>'}</tbody>
+        <td>${esc(formatarData(u.criado_em))}</td>
+        <td><button class="link perigo" data-excluir-usuario="${u.id}">excluir</button></td></tr>`).join('') || '<tr><td colspan="8" class="meta">Ninguém cadastrado ainda.</td></tr>'}</tbody>
     </table></div>`;
 
   const corpo = document.getElementById('corpo');
@@ -1010,7 +1071,8 @@ async function telaAdmin() {
       <tr class="${e.feedback ? '' : 'sem-fb'}">
         <td><a href="#/admin/usuario/${e.usuario_id}"><strong>${esc(e.nome)}</strong></a><div class="meta">${nomeTipo(e.tipo)}</div></td>
         <td>${esc(e.cidade)}<div class="meta">${esc(e.sindicato)} · ${esc(e.horario)}</div></td>
-        <td><strong>${e.numero}</strong><div><button class="link" data-ver="${e.id}">${abertos.has(e.id) ? 'fechar envio' : 'ver envio'}</button></div></td>
+        <td><strong>${e.numero}</strong><div><button class="link" data-ver="${e.id}">${abertos.has(e.id) ? 'fechar envio' : 'ver envio'}</button></div>
+          <div><button class="link perigo" data-excluir-envio="${e.id}">excluir</button></div></td>
         <td>${esc(formatarData(e.enviado_em || e.atualizado_em))}${e.edicoes ? `<div class="meta"><span class="tag">editado ${e.edicoes === 1 ? '1 vez' : `${e.edicoes} vezes`}</span></div><div class="meta">última em ${esc(formatarData(e.atualizado_em))}</div>` : ''}</td>
         <td class="col-fb">${caixaFeedbackEnvio(e)}</td>
       </tr>
@@ -1021,6 +1083,12 @@ async function telaAdmin() {
   // A lista vem sem os textos; o conteúdo de cada envio é buscado ao abrir.
   const detalhes = new Map();
   corpo.onclick = async (ev) => {
+    const excluir = ev.target.closest('[data-excluir-envio]');
+    if (excluir) {
+      const e = envios.find((x) => x.id === Number(excluir.dataset.excluirEnvio));
+      if (await excluirEnvio(e)) telaAdmin();
+      return;
+    }
     const ver = ev.target.closest('[data-ver]');
     if (!ver) return;
     const id = Number(ver.dataset.ver);
@@ -1047,6 +1115,32 @@ async function telaAdmin() {
   document.getElementById('busca').oninput = (ev) => { filtro.busca = ev.target.value.trim(); desenhar(); };
   ligarFeedbacks(corpo, envios);
   desenhar();
+
+  document.getElementById('cadastrados').onclick = async (ev) => {
+    const b = ev.target.closest('[data-excluir-usuario]');
+    if (!b) return;
+    if (await excluirUsuario(usuarios.find((u) => u.id === Number(b.dataset.excluirUsuario)))) telaAdmin();
+  };
+
+  document.getElementById('f-liberados').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const f = ev.target;
+    const corpoOcultos = {};
+    for (const t of ['especialista', 'instrutor']) {
+      corpoOcultos[t] = [...f.querySelectorAll(`input[name=${t}]`)].filter((c) => !c.checked).map((c) => Number(c.value));
+    }
+    const botao = f.querySelector('button');
+    botao.disabled = true;
+    try {
+      await api('/api/admin/modulos-ocultos', { json: corpoOcultos });
+      avisar('Módulos liberados atualizados.');
+      await telaAdmin();
+      document.getElementById('liberados').open = true;
+    } catch (err) {
+      avisar(err.message);
+      botao.disabled = false;
+    }
+  };
 }
 
 // ---------- perfil ----------
