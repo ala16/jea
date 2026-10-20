@@ -54,11 +54,12 @@ ADMIN_PASSWORD=sua-senha npm start
 - **Entrada por CPF** (com validação dos dígitos). No primeiro acesso a pessoa informa nome completo, e-mail, WhatsApp e se é especialista ou instrutor (obrigatórios); foto e redes sociais são opcionais e podem ser preenchidos depois no perfil.
 - **Painel**: cadastra quantas turmas quiser (cidade, sindicato rural e horário).
 - **8 módulos por turma**:
-  - Especialista, módulo 1: Planejamento (título, missão, objetivo, metas, valores, visão, cronograma, orçamento) e Expedição do Agro (local, data, objetivo, resultado, foto).
+  - Especialista, módulo 1: Planejamento (título, objetivo, missão, visão, valores, metas, cronograma, orçamento) e anexos opcionais.
   - Especialista, módulos 2 a 8: texto e anexo.
   - Instrutor, módulos 1 a 8: texto e imagem.
   - Depois de enviado, o módulo aparece só para leitura, com o botão **Editar envio**. Cada edição guarda a versão anterior (inclusive os anexos removidos) e o gestor vê o histórico de edições no envio, com o antes e depois de cada campo.
   - Textos com limite de 2000 caracteres e arquivos de até 5MB.
+- **8 Expedições do Agro por turma** (só especialista), numa aba própria da turma, separada dos módulos: local, data, objetivo, resultado e fotos. Têm a mesma edição com histórico, feedback, exclusão pelo gestor e liberação (o gestor escolhe quais expedições aparecem). A expedição que antes ficava no fim do módulo 1 foi passada para a Expedição 1, com fotos, datas e feedback.
 - **Perfil**: clicando na foto ou no nome no topo, a pessoa edita nome, e-mail, foto e links das redes sociais (WhatsApp, Instagram, Facebook, LinkedIn, site). No fórum, o nome do autor abre o perfil dele.
 - **Participantes**: lista de especialistas e instrutores (filtro por perfil e busca). O perfil mostra as turmas, o progresso e as postagens no fórum, mas não o conteúdo dos módulos.
 - **Mensagens**: conversas diretas entre participantes, com contador de não lidas no menu.

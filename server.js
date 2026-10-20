@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const express = require('express');
 const db = require('./db');
 const arquivos = require('./arquivos');
-const { MODULO1_ESPECIALISTA_CAMPOS } = require('./public/campos');
+const { MODULO1_ESPECIALISTA_CAMPOS, EXPEDICAO_CAMPOS } = require('./public/campos');
 
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
@@ -340,9 +340,21 @@ async function modulosDisponiveis(tipo) {
   return [1, 2, 3, 4, 5, 6, 7, 8].filter((n) => !ocultos.includes(n));
 }
 
+// Expedições do Agro: só o especialista envia, e só as que o gestor liberou.
+async function expedicoesDisponiveis(tipo) {
+  if (tipo !== 'especialista') return [];
+  const ocultas = await db.expedicoesOcultas();
+  return [1, 2, 3, 4, 5, 6, 7, 8].filter((n) => !ocultas.includes(n));
+}
+
 app.get('/api/turmas/:turmaId', exigirUsuario, carregarTurma, async (req, res) => {
-  const [modulos, disponiveis] = await Promise.all([db.modulosDaTurma(req.turma.id), modulosDisponiveis(req.usuario.tipo)]);
-  res.json({ turma: req.turma, modulos, disponiveis });
+  const [modulos, disponiveis, expedicoes, expedicoesLiberadas] = await Promise.all([
+    db.modulosDaTurma(req.turma.id),
+    modulosDisponiveis(req.usuario.tipo),
+    db.modulosDaTurma(req.turma.id, 'expedicao'),
+    expedicoesDisponiveis(req.usuario.tipo),
+  ]);
+  res.json({ turma: req.turma, modulos, disponiveis, expedicoes, expedicoesDisponiveis: expedicoesLiberadas });
 });
 
 app.delete('/api/turmas/:turmaId', exigirUsuario, carregarTurma, async (req, res) => {
@@ -351,40 +363,57 @@ app.delete('/api/turmas/:turmaId', exigirUsuario, carregarTurma, async (req, res
   res.json({ ok: true });
 });
 
-app.post('/api/turmas/:turmaId/modulos/:numero', exigirUsuario, carregarTurma, async (req, res) => {
-  const numero = Number(req.params.numero);
-  if (!(Number.isInteger(numero) && numero >= 1 && numero <= 8)) return res.status(404).json({ erro: 'Módulo inválido.' });
-  if (!(await modulosDisponiveis(req.usuario.tipo)).includes(numero)) {
-    return res.status(403).json({ erro: 'Este módulo não está liberado para envio.' });
-  }
-  const instrutor = req.usuario.tipo === 'instrutor';
-  const modulo1Especialista = !instrutor && numero === 1;
-
-  // Instrutor envia imagem; a foto da expedição também é imagem.
-  const novos = lerArquivos(req.body.anexos, req.body.anexo, { imagem: instrutor || modulo1Especialista });
-
-  let dados = null;
-  let textoModulo = null;
-  if (modulo1Especialista) {
-    dados = {};
-    for (const c of MODULO1_ESPECIALISTA_CAMPOS) if (c.chave) dados[c.chave] = texto(req.body[c.chave], c.max || MAX_TEXTO);
-  } else {
-    textoModulo = texto(req.body.texto);
-  }
-
-  // Mantém os anexos anteriores, menos os marcados para remover (removerAnexo antigo remove todos).
-  const salvo = await db.modulo(req.turma.id, numero);
+// Envio ou edição de um módulo ou de uma expedição. Mantém os anexos anteriores,
+// menos os marcados para remover (removerAnexo antigo remove todos).
+async function salvarEnvio(req, res, area, numero, { dados, texto: textoEnvio, imagem }) {
+  const novos = lerArquivos(req.body.anexos, req.body.anexo, { imagem });
+  const salvo = await db.modulo(req.turma.id, area, numero);
   const anterior = salvo?.anexos || [];
   const remover = new Set(Array.isArray(req.body.removerAnexos) ? req.body.removerAnexos.map(String) : []);
   const fica = (a) => !req.body.removerAnexo && !remover.has(a.url);
   const anexos = [...anterior.filter(fica), ...novos.filter((n) => !anterior.some((a) => a.url === n.url))];
-  if (anexos.length > MAX_ARQUIVOS) return res.status(400).json({ erro: `Cada módulo aceita até ${MAX_ARQUIVOS} arquivos.` });
+  if (anexos.length > MAX_ARQUIVOS) return res.status(400).json({ erro: `Cada envio aceita até ${MAX_ARQUIVOS} arquivos.` });
 
   // Salvar sem mudar nada não conta como edição. Os anexos removidos numa edição não são
   // apagados: continuam na versão anterior, que o gestor vê no histórico.
-  const novo = { dados, texto: textoModulo, anexos };
+  const novo = { dados, texto: textoEnvio, anexos };
   if (salvo && !mudou(salvo, novo)) return res.json({ modulo: salvo });
-  res.json({ modulo: await db.salvarModulo(req.turma.id, numero, novo, salvo) });
+  res.json({ modulo: await db.salvarModulo(req.turma.id, area, numero, novo, salvo) });
+}
+
+function lerCampos(body, campos) {
+  const dados = {};
+  for (const c of campos) dados[c.chave] = texto(body[c.chave], c.max || MAX_TEXTO);
+  return dados;
+}
+
+function numeroValido(v) {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 1 && n <= 8 ? n : null;
+}
+
+app.post('/api/turmas/:turmaId/modulos/:numero', exigirUsuario, carregarTurma, async (req, res) => {
+  const numero = numeroValido(req.params.numero);
+  if (!numero) return res.status(404).json({ erro: 'Módulo inválido.' });
+  if (!(await modulosDisponiveis(req.usuario.tipo)).includes(numero)) {
+    return res.status(403).json({ erro: 'Este módulo não está liberado para envio.' });
+  }
+  const instrutor = req.usuario.tipo === 'instrutor';
+  // Módulo 1 do especialista é o planejamento; os outros são texto e anexos. Instrutor envia imagens.
+  if (!instrutor && numero === 1) {
+    return salvarEnvio(req, res, 'modulo', numero, { dados: lerCampos(req.body, MODULO1_ESPECIALISTA_CAMPOS), texto: null });
+  }
+  return salvarEnvio(req, res, 'modulo', numero, { dados: null, texto: texto(req.body.texto), imagem: instrutor });
+});
+
+app.post('/api/turmas/:turmaId/expedicoes/:numero', exigirUsuario, carregarTurma, async (req, res) => {
+  const numero = numeroValido(req.params.numero);
+  if (!numero) return res.status(404).json({ erro: 'Expedição inválida.' });
+  if (req.usuario.tipo !== 'especialista') return res.status(403).json({ erro: 'As expedições são enviadas pelo especialista.' });
+  if (!(await expedicoesDisponiveis(req.usuario.tipo)).includes(numero)) {
+    return res.status(403).json({ erro: 'Esta expedição não está liberada para envio.' });
+  }
+  return salvarEnvio(req, res, 'expedicao', numero, { dados: lerCampos(req.body, EXPEDICAO_CAMPOS), texto: null, imagem: true });
 });
 
 // Fórum: todos os cadastrados leem e publicam nos três fóruns.
@@ -552,8 +581,10 @@ app.post('/api/admin/entrar', (req, res) => {
 });
 
 app.get('/api/admin/envios', exigirAdmin, async (req, res) => {
-  const [envios, usuarios, ocultos] = await Promise.all([db.listaEnvios(), db.todosUsuarios(), db.modulosOcultos()]);
-  res.json({ envios, usuarios, ocultos });
+  const [envios, usuarios, ocultos, expedicoesOcultas] = await Promise.all([
+    db.listaEnvios(), db.todosUsuarios(), db.modulosOcultos(), db.expedicoesOcultas(),
+  ]);
+  res.json({ envios, usuarios, ocultos, expedicoesOcultas });
 });
 
 // O gestor escolhe, para cada perfil, quais módulos ficam ocultos (sem envio).
@@ -565,6 +596,13 @@ app.post('/api/admin/modulos-ocultos', exigirAdmin, async (req, res) => {
   }
   await db.definirModulosOcultos(ocultos);
   res.json({ ocultos: await db.modulosOcultos() });
+});
+
+// Expedições que ainda não aparecem para os especialistas.
+app.post('/api/admin/expedicoes-ocultas', exigirAdmin, async (req, res) => {
+  const lista = Array.isArray(req.body.ocultas) ? req.body.ocultas.map(numeroValido).filter(Boolean) : [];
+  await db.definirExpedicoesOcultas([...new Set(lista)]);
+  res.json({ ocultas: await db.expedicoesOcultas() });
 });
 
 // Excluir um envio: o módulo volta a ficar pendente e a pessoa precisa enviar de novo.

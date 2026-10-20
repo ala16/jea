@@ -90,9 +90,9 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
   r = await a('/api/turmas', { json: { cidade: 'Goiânia', sindicato: 'SR Goiânia', horario: 'sáb 8h-12h' } });
   const turmaId = r.body.turma.id;
 
-  // Módulo 1 do especialista: só aceita imagem
+  // A foto da expedição precisa ser imagem.
   const pdfA = await subir(a, '%PDF', 'application/pdf', 'doc.pdf');
-  r = await a(`/api/turmas/${turmaId}/modulos/1`, { json: { titulo: 'x', anexo: pdfA } });
+  r = await a(`/api/turmas/${turmaId}/expedicoes/1`, { json: { expedicao_local: 'x', anexo: pdfA } });
   assert.equal(r.status, 400);
 
   const exp = await subir(a, 'img', 'image/jpeg', 'exp.jpg');
@@ -101,7 +101,8 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
   });
   assert.equal(r.status, 200);
   assert.equal(r.body.modulo.dados.titulo, 'teste');
-  assert.equal(r.body.modulo.dados.expedicao_local, 'Fazenda X');
+  // A expedição saiu do módulo 1: agora tem a sua própria área.
+  assert.ok(!('expedicao_local' in r.body.modulo.dados));
   const anexo = r.body.modulo.anexos[0].url;
   assert.equal(anexo, exp.url);
 
@@ -129,6 +130,23 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
   assert.equal((await a(`/api/turmas/${turmaId}`)).body.modulos.find((m) => m.numero === 1).edicoes, 3);
 
   assert.equal((await a(`/api/turmas/${turmaId}/modulos/2`, { json: { texto: 'relato', anexo: pdfA } })).status, 200);
+
+  // Expedições do Agro: 8 por turma, separadas dos módulos.
+  const fotoExp = await subir(a, 'img', 'image/jpeg', 'fazenda.jpg');
+  r = await a(`/api/turmas/${turmaId}/expedicoes/1`, { json: { expedicao_local: 'Fazenda X', expedicao_data: '15/06', anexos: [fotoExp] } });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.modulo.area, 'expedicao');
+  assert.equal(r.body.modulo.dados.expedicao_local, 'Fazenda X');
+  r = await a(`/api/turmas/${turmaId}/expedicoes/1`, { json: { expedicao_local: 'Fazenda Y', expedicao_data: '15/06' } });
+  assert.deepEqual(r.body.modulo.anexos.map((x) => x.url), [fotoExp.url]);
+  assert.equal((await a(`/api/turmas/${turmaId}/expedicoes/9`, { json: {} })).status, 404);
+  r = await a(`/api/turmas/${turmaId}`);
+  assert.equal(r.body.modulos.length, 2);
+  assert.deepEqual(r.body.expedicoes.map((e) => [e.numero, e.edicoes]), [[1, 1]]);
+  assert.deepEqual(r.body.expedicoesDisponiveis, [1, 2, 3, 4, 5, 6, 7, 8]);
+  r = await a('/api/turmas');
+  assert.equal(r.body.turmas[0].modulos_enviados, 2);
+  assert.equal(r.body.turmas[0].expedicoes_enviadas, 1);
   assert.equal((await a(`/api/turmas/${turmaId}/modulos/9`, { json: {} })).status, 404);
   assert.equal((await a(`/api/turmas/${turmaId}/modulos/3`, { json: { anexo: { url: 'https://evil.example/x.png' } } })).status, 400);
 
@@ -142,6 +160,9 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
   assert.equal((await b(`/api/turmas/${turmaB}/modulos/3`, { json: { texto: 'x', anexo: pdfB } })).status, 400);
   const img = await subir(b, 'img', 'image/png', 'a.png');
   assert.equal((await b(`/api/turmas/${turmaB}/modulos/3`, { json: { texto: 'aula 3', anexo: img } })).status, 200);
+  // Instrutor não tem expedições.
+  assert.equal((await b(`/api/turmas/${turmaB}/expedicoes/1`, { json: { expedicao_local: 'x' } })).status, 403);
+  assert.deepEqual((await b(`/api/turmas/${turmaB}`)).body.expedicoesDisponiveis, []);
 
   // Isolamento entre usuários
   assert.equal((await b(`/api/turmas/${turmaId}`)).status, 404);
@@ -154,11 +175,12 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
   assert.equal((await adm('/api/admin/entrar', { json: { senha: 'errada' } })).status, 401);
   assert.equal((await adm('/api/admin/entrar', { json: { senha: 'segredo' } })).status, 200);
   r = await adm('/api/admin/envios');
-  assert.equal(r.body.envios.length, 3);
+  assert.equal(r.body.envios.length, 4);
   assert.equal(r.body.usuarios.length, 2);
   const maria = r.body.usuarios.find((u) => u.nome === 'Maria da Silva');
   assert.equal(maria.envios, 2);
-  assert.equal(maria.sem_feedback, 2);
+  assert.equal(maria.expedicoes, 1);
+  assert.equal(maria.sem_feedback, 3);
   assert.equal((await adm(anexo)).status, 200);
 
   // A lista do gestor vem sem os textos; cada envio é aberto à parte.
@@ -169,7 +191,13 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
   assert.equal((await adm('/api/admin/envios/999999')).status, 404);
 
   // Histórico de edições para o gestor: as versões anteriores, da mais antiga para a mais nova.
-  const env1 = r.body.envios.find((e) => e.numero === 1 && e.nome === 'Maria da Silva');
+  const env1 = r.body.envios.find((e) => e.area === 'modulo' && e.numero === 1 && e.nome === 'Maria da Silva');
+  const exp1 = r.body.envios.find((e) => e.area === 'expedicao');
+  assert.equal(exp1.numero, 1);
+  assert.equal(exp1.edicoes, 1);
+  assert.equal((await adm(`/api/admin/envios/${exp1.id}`)).body.envio.historico[0].dados.expedicao_local, 'Fazenda X');
+  assert.equal((await adm(fotoExp.url)).status, 200);
+  assert.equal((await b(fotoExp.url)).status, 403);
   assert.equal(env1.edicoes, 3);
   const hist = (await adm(`/api/admin/envios/${env1.id}`)).body.envio.historico;
   assert.deepEqual(hist.map((h) => h.dados.titulo), ['teste', 'teste 2', 'teste 3']);
@@ -181,10 +209,21 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
 
   const ids = r.body.envios.map((e) => e.id);
   r = await adm('/api/admin/feedback', { json: { ids, feedback: 'Muito bom!' } });
-  assert.equal(r.body.atualizados, 3);
+  assert.equal(r.body.atualizados, 4);
 
   r = await a(`/api/turmas/${turmaId}`);
   assert.ok(r.body.modulos.every((m) => m.feedback === 'Muito bom!'));
+  assert.equal(r.body.expedicoes[0].feedback, 'Muito bom!');
+
+  // O gestor escolhe quais expedições ficam liberadas.
+  assert.equal((await a('/api/admin/expedicoes-ocultas', { json: { ocultas: [2] } })).status, 401);
+  r = await adm('/api/admin/expedicoes-ocultas', { json: { ocultas: [3, 2, 2, 9] } });
+  assert.deepEqual(r.body.ocultas, [2, 3]);
+  assert.deepEqual((await adm('/api/admin/envios')).body.expedicoesOcultas, [2, 3]);
+  assert.deepEqual((await a(`/api/turmas/${turmaId}`)).body.expedicoesDisponiveis, [1, 4, 5, 6, 7, 8]);
+  assert.equal((await a(`/api/turmas/${turmaId}/expedicoes/2`, { json: { expedicao_local: 'x' } })).status, 403);
+  await adm('/api/admin/expedicoes-ocultas', { json: { ocultas: [] } });
+  assert.equal((await a(`/api/turmas/${turmaId}/expedicoes/2`, { json: { expedicao_local: 'x' } })).status, 200);
 
   // Excluir turma: só o dono, e some da lista
   assert.equal((await b(`/api/turmas/${turmaId}`, { method: 'DELETE' })).status, 404);
@@ -192,6 +231,7 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
   assert.equal((await a('/api/turmas')).body.turmas.length, 0);
   assert.equal((await a(anexo)).status, 404);
   assert.equal((await a(exp2.url)).status, 404);
+  assert.equal((await a(fotoExp.url)).status, 404);
   assert.ok(!fs.existsSync(path.join(tmp, path.basename(exp2.url))));
 });
 
@@ -474,4 +514,34 @@ test('gestor: excluir envio, ocultar módulos e excluir pessoa', async () => {
   assert.ok(!(await adm('/api/admin/envios')).body.envios.some((e) => e.usuario_id === id));
   r = await a('/api/eu');
   assert.equal(r.body.usuario, null);
+});
+
+test('a Expedição do Agro do módulo 1 passa para a Expedição 1 sem perder nada', async () => {
+  const { PGlite } = require('@electric-sql/pglite');
+  const { SCHEMA } = require('../db');
+  const pg = new PGlite('memory://');
+  await pg.exec(SCHEMA);
+  // Como estava antes: a expedição junto do planejamento, com a foto e o feedback do módulo 1.
+  await pg.exec(`
+    INSERT INTO usuarios (id, cpf, nome, tipo) VALUES (1, '52998224725', 'Ana Antiga', 'especialista');
+    INSERT INTO turmas (id, usuario_id, cidade, sindicato, periodo) VALUES (1, 1, 'Jataí', 'SR Jataí', '08:00 às 12:00'), (2, 1, 'Mineiros', 'SR', '08:00');
+    INSERT INTO modulos (turma_id, numero, dados, anexos, enviado_em, atualizado_em, feedback, feedback_em) VALUES
+      (1, 1, '{"titulo":"Projeto","expedicao_local":"Fazenda Boa Vista","expedicao_data":"10/05","expedicao_objetivo":"Conhecer","expedicao_resultado":"Ótimo"}',
+       '[{"url":"/arquivos/foto.jpg","nome":"foto.jpg"}]', '2026-05-01', '2026-05-02', 'Parabéns', '2026-05-03'),
+      (2, 1, '{"titulo":"Só planejamento","expedicao_local":"","expedicao_data":"","expedicao_objetivo":"","expedicao_resultado":""}',
+       '[]', '2026-05-01', '2026-05-01', NULL, NULL);
+  `);
+  await pg.exec(SCHEMA);
+  await pg.exec(SCHEMA); // roda de novo em cada deploy: não pode duplicar nem apagar nada
+  const { rows } = await pg.query('SELECT turma_id, area, numero, dados, anexos, enviado_em, feedback FROM modulos ORDER BY turma_id, area DESC');
+  assert.equal(rows.length, 3);
+  const [m1, e1, m2] = rows;
+  assert.deepEqual([m1.area, m1.numero, m1.dados, m1.anexos, m1.feedback], ['modulo', 1, { titulo: 'Projeto' }, [], 'Parabéns']);
+  assert.deepEqual([e1.area, e1.numero, e1.feedback], ['expedicao', 1, 'Parabéns']);
+  assert.deepEqual(e1.dados, { expedicao_local: 'Fazenda Boa Vista', expedicao_data: '10/05', expedicao_objetivo: 'Conhecer', expedicao_resultado: 'Ótimo' });
+  assert.deepEqual(e1.anexos, [{ url: '/arquivos/foto.jpg', nome: 'foto.jpg' }]);
+  assert.equal(e1.enviado_em.toISOString(), m1.enviado_em.toISOString());
+  // Expedição vazia não vira envio.
+  assert.deepEqual([m2.turma_id, m2.area, m2.dados], [2, 'modulo', { titulo: 'Só planejamento' }]);
+  await pg.close();
 });

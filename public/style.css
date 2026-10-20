@@ -436,3 +436,6 @@ input[type=file]:hover { border-color: var(--verde); }
 .modulos-liberados .check { display: inline-flex; gap: 6px; align-items: center; margin: 6px 16px 0 0; font-weight: 400; font-size: 14px; }
 .envio-conteudo > .link.perigo { margin: 8px 0 0; }
 .tabela-envios .link.perigo { margin-left: 0; }
+.abas a .meta { font-size: 13px; }
+.abas a.ativa .meta { color: #fff; }
+.turma-ficha h3 { margin: 20px 0 6px; }
