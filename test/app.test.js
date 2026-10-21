@@ -372,3 +372,55 @@ test('participantes e mensagens diretas', async () => {
   assert.equal((await a('/api/mensagens')).body.conversas[0].nao_lidas, 1);
   assert.equal((await cliente()('/api/mensagens')).status, 401);
 });
+
+test('gestor: perfil com foto, aparece nos participantes, publica e conversa', async () => {
+  const adm = cliente();
+  assert.equal((await adm('/api/gestor')).status, 401);
+  await adm('/api/admin/entrar', { json: { senha: 'segredo' } });
+  let r = await adm('/api/gestor');
+  assert.equal(r.status, 200);
+  const g = r.body.usuario;
+  assert.equal(g.tipo, 'gestor');
+
+  const foto = await subir(adm, 'fakepng', 'image/png', 'gestor.png');
+  // E-mail obrigatório; WhatsApp opcional para o gestor.
+  assert.equal((await adm('/api/perfil', { json: { nome: 'Ana Gestora', foto } })).status, 400);
+  r = await adm('/api/perfil', {
+    json: { nome: 'Ana Gestora', email: 'ana@jea.org', foto, redes: { instagram: 'instagram.com/jea' } },
+  });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.usuario.foto, foto.url);
+  assert.equal(r.body.usuario.tipo, 'gestor');
+  assert.equal((await adm('/api/gestor')).body.usuario.nome, 'Ana Gestora');
+
+  // Participantes veem o gestor (primeiro da lista), abrem o perfil e veem a foto.
+  const a = cliente();
+  await a('/api/entrar', { json: { cpf: CPF_A } });
+  r = await a('/api/participantes');
+  assert.equal(r.body.participantes[0].id, g.id);
+  r = await a(`/api/perfil/${g.id}`);
+  assert.equal(r.body.perfil.nome, 'Ana Gestora');
+  assert.equal(r.body.perfil.redes.instagram, 'https://instagram.com/jea');
+  assert.equal(r.body.perfil.email, undefined);
+  assert.equal((await a(foto.url)).status, 200);
+
+  // O gestor não entra na lista de cadastrados do painel.
+  r = await adm('/api/admin/envios');
+  assert.ok(r.body.usuarios.every((u) => u.tipo !== 'gestor'));
+
+  // Publica no fórum com o próprio perfil.
+  r = await adm('/api/forum/geral', { json: { titulo: 'Boas-vindas', texto: 'Olá a todos' } });
+  assert.equal(r.status, 200);
+  r = await a(`/api/forum/topico/${r.body.topico.id}`);
+  assert.equal(r.body.topico.autor, 'Ana Gestora');
+  assert.equal(r.body.topico.autor_foto, foto.url);
+
+  // Conversa por mensagem direta.
+  assert.equal((await a(`/api/mensagens/${g.id}`, { json: { texto: 'Oi, gestora!' } })).status, 200);
+  assert.equal((await adm('/api/mensagens/nao-lidas')).body.total, 1);
+  const idA = (await a('/api/eu')).body.usuario.id;
+  assert.equal((await adm(`/api/mensagens/${idA}`, { json: { texto: 'Oi!' } })).status, 200);
+
+  // O gestor não cria turmas.
+  assert.equal((await adm('/api/turmas', { json: { cidade: 'x', sindicato: 'y', horario: 'z' } })).status, 401);
+});

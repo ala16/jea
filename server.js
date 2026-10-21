@@ -109,6 +109,22 @@ function exigirAdmin(req, res, next) {
   next();
 }
 
+// Participante cadastrado ou o gestor (que também tem perfil, publica no fórum e conversa).
+async function exigirPessoa(req, res, next) {
+  if (sessao(req).admin) {
+    req.admin = true;
+    req.usuario = await db.gestor();
+    return next();
+  }
+  await exigirUsuario(req, res, next);
+}
+
+// Quem pode enviar arquivos: CPF logado ou o gestor.
+function exigirLogado(req, res, next) {
+  if (sessao(req).admin) return next();
+  exigirCpf(req, res, next);
+}
+
 // Lê { url, nome } enviado pelo navegador depois do upload e confere se é um arquivo nosso.
 function lerArquivo(v, { imagem } = {}) {
   if (!v || typeof v !== 'object') return null;
@@ -135,11 +151,11 @@ app.get('/api/config', (req, res) => {
 
 // Upload: na Vercel o navegador envia direto para o Vercel Blob (limite de 4,5MB das funções);
 // localmente o arquivo vem para o servidor e fica em disco.
-app.post('/api/blob', exigirCpf, async (req, res) => {
+app.post('/api/blob', exigirLogado, async (req, res) => {
   res.json(await arquivos.gerarTokenBlob(req));
 });
 
-app.post('/api/upload', exigirCpf, arquivos.uploadLocal);
+app.post('/api/upload', exigirLogado, arquivos.uploadLocal);
 
 app.get('/arquivos/:nome', async (req, res) => {
   const nome = path.basename(req.params.nome);
@@ -173,6 +189,10 @@ app.get('/api/eu', exigirCpf, (req, res) => {
   res.json({ cpf: req.cpf, usuario: req.usuario });
 });
 
+app.get('/api/gestor', exigirAdmin, async (req, res) => {
+  res.json({ usuario: await db.gestor() });
+});
+
 // Perfil: a pessoa edita nome, foto e redes sociais. O perfil (tipo) não muda.
 const REDES = ['instagram', 'facebook', 'linkedin', 'site'];
 
@@ -204,11 +224,12 @@ function lerEmail(v) {
   return email;
 }
 
-function lerRedes(v) {
+// O WhatsApp é obrigatório para os participantes; para o gestor, opcional.
+function lerRedes(v, { whatsappOpcional } = {}) {
   const redes = {};
   const whatsapp = lerWhatsapp(v?.whatsapp);
-  if (!whatsapp) throw erro400('Informe seu WhatsApp com DDD.');
-  redes.whatsapp = whatsapp;
+  if (!whatsapp && !whatsappOpcional) throw erro400('Informe seu WhatsApp com DDD.');
+  if (whatsapp) redes.whatsapp = whatsapp;
   for (const r of REDES) {
     const link = lerLink(v?.[r]);
     if (link) redes[r] = link;
@@ -242,10 +263,10 @@ app.post('/api/cadastro', exigirCpf, async (req, res) => {
   res.json({ usuario });
 });
 
-app.post('/api/perfil', exigirUsuario, async (req, res) => {
+app.post('/api/perfil', exigirPessoa, async (req, res) => {
   const nome = lerNome(req.body.nome);
   const email = lerEmail(req.body.email);
-  const redes = lerRedes(req.body.redes);
+  const redes = lerRedes(req.body.redes, { whatsappOpcional: req.admin });
   const nova = lerArquivo(req.body.foto, { imagem: true });
   const antiga = req.usuario.foto;
   const foto = nova ? nova.url : req.body.removerFoto ? null : antiga;
@@ -254,7 +275,7 @@ app.post('/api/perfil', exigirUsuario, async (req, res) => {
   res.json({ usuario });
 });
 
-app.get('/api/perfil/:id', exigirLeitorForum, async (req, res) => {
+app.get('/api/perfil/:id', exigirPessoa, async (req, res) => {
   const id = Number(req.params.id);
   const perfil = Number.isInteger(id) ? await db.perfil(id) : null;
   if (!perfil) return res.status(404).json({ erro: 'Perfil não encontrado.' });
@@ -263,16 +284,16 @@ app.get('/api/perfil/:id', exigirLeitorForum, async (req, res) => {
   res.json({ perfil, turmas, postagens });
 });
 
-app.get('/api/participantes', exigirLeitorForum, async (req, res) => {
+app.get('/api/participantes', exigirPessoa, async (req, res) => {
   res.json({ participantes: await db.participantes() });
 });
 
 // Mensagens diretas entre participantes.
-app.get('/api/mensagens', exigirUsuario, async (req, res) => {
+app.get('/api/mensagens', exigirPessoa, async (req, res) => {
   res.json({ conversas: await db.conversas(req.usuario.id) });
 });
 
-app.get('/api/mensagens/nao-lidas', exigirUsuario, async (req, res) => {
+app.get('/api/mensagens/nao-lidas', exigirPessoa, async (req, res) => {
   res.json({ total: await db.naoLidas(req.usuario.id) });
 });
 
@@ -283,11 +304,11 @@ async function carregarOutro(req, res, next) {
   next();
 }
 
-app.get('/api/mensagens/:id', exigirUsuario, carregarOutro, async (req, res) => {
+app.get('/api/mensagens/:id', exigirPessoa, carregarOutro, async (req, res) => {
   res.json({ outro: req.outro, mensagens: await db.conversa(req.usuario.id, req.outro.id) });
 });
 
-app.post('/api/mensagens/:id', exigirUsuario, carregarOutro, async (req, res) => {
+app.post('/api/mensagens/:id', exigirPessoa, carregarOutro, async (req, res) => {
   const corpo = texto(req.body.texto).trim();
   if (!corpo) return res.status(400).json({ erro: 'Escreva a mensagem.' });
   res.json({ mensagem: await db.enviarMensagem(req.usuario.id, req.outro.id, corpo) });
@@ -360,28 +381,20 @@ app.post('/api/turmas/:turmaId/modulos/:numero', exigirUsuario, carregarTurma, a
 });
 
 // Fórum: todos os cadastrados leem e publicam nos três fóruns.
-// O admin lê tudo e pode apagar qualquer mensagem.
+// O gestor também publica (com o perfil dele) e pode apagar qualquer mensagem.
 const FORUNS = ['geral', 'especialista', 'instrutor'];
-
-async function exigirLeitorForum(req, res, next) {
-  if (sessao(req).admin) {
-    req.admin = true;
-    return next();
-  }
-  await exigirUsuario(req, res, next);
-}
 
 function podePublicar(usuario) {
   return Boolean(usuario);
 }
 
-app.get('/api/forum/:forum', exigirLeitorForum, async (req, res) => {
+app.get('/api/forum/:forum', exigirPessoa, async (req, res) => {
   const forum = req.params.forum;
   if (!FORUNS.includes(forum)) return res.status(404).json({ erro: 'Fórum não encontrado.' });
   res.json({ topicos: await db.topicos(forum), podePublicar: podePublicar(req.usuario) });
 });
 
-app.post('/api/forum/:forum', exigirUsuario, async (req, res) => {
+app.post('/api/forum/:forum', exigirPessoa, async (req, res) => {
   const forum = req.params.forum;
   if (!FORUNS.includes(forum)) return res.status(404).json({ erro: 'Fórum não encontrado.' });
   const titulo = texto(req.body.titulo, 200).trim();
@@ -400,7 +413,7 @@ async function carregarTopico(req, res, next) {
   next();
 }
 
-app.get('/api/forum/topico/:id', exigirLeitorForum, carregarTopico, async (req, res) => {
+app.get('/api/forum/topico/:id', exigirPessoa, carregarTopico, async (req, res) => {
   res.json({
     topico: req.topico,
     respostas: await db.respostas(req.topico.id),
@@ -410,7 +423,7 @@ app.get('/api/forum/topico/:id', exigirLeitorForum, carregarTopico, async (req, 
   });
 });
 
-app.post('/api/forum/topico/:id/respostas', exigirUsuario, carregarTopico, async (req, res) => {
+app.post('/api/forum/topico/:id/respostas', exigirPessoa, carregarTopico, async (req, res) => {
   const corpo = texto(req.body.texto).trim();
   const imagem = lerArquivo(req.body.imagem, { imagem: true });
   if (!corpo && !imagem) return res.status(400).json({ erro: 'Escreva a resposta ou envie uma imagem.' });
@@ -419,14 +432,14 @@ app.post('/api/forum/topico/:id/respostas', exigirUsuario, carregarTopico, async
   });
 });
 
-app.delete('/api/forum/topico/:id', exigirLeitorForum, carregarTopico, async (req, res) => {
+app.delete('/api/forum/topico/:id', exigirPessoa, carregarTopico, async (req, res) => {
   if (!req.admin && req.topico.usuario_id !== req.usuario.id) return res.status(403).json({ erro: 'Só o autor pode apagar.' });
   const imgs = await db.excluirTopico(req.topico.id);
   await Promise.all(imgs.map((u) => arquivos.remover(u)));
   res.json({ ok: true });
 });
 
-app.delete('/api/forum/resposta/:id', exigirLeitorForum, async (req, res) => {
+app.delete('/api/forum/resposta/:id', exigirPessoa, async (req, res) => {
   const id = Number(req.params.id);
   const r = Number.isInteger(id) ? await db.resposta(id) : null;
   if (!r) return res.status(404).json({ erro: 'Resposta não encontrada.' });
@@ -439,7 +452,7 @@ app.delete('/api/forum/resposta/:id', exigirLeitorForum, async (req, res) => {
 // Avisos: o admin publica; cada usuário vê os gerais e os do seu perfil.
 const PUBLICOS = ['todos', 'especialista', 'instrutor'];
 
-app.get('/api/avisos', exigirLeitorForum, async (req, res) => {
+app.get('/api/avisos', exigirPessoa, async (req, res) => {
   res.json({ avisos: await db.avisos(req.admin ? null : req.usuario.tipo) });
 });
 
@@ -460,7 +473,7 @@ app.delete('/api/admin/avisos/:id', exigirAdmin, async (req, res) => {
 // Materiais: só o admin publica; todos os cadastrados veem as três categorias.
 const CATEGORIAS = ['geral', 'especialista', 'instrutor'];
 
-app.get('/api/materiais', exigirLeitorForum, async (req, res) => {
+app.get('/api/materiais', exigirPessoa, async (req, res) => {
   res.json({ materiais: await db.materiais(), admin: Boolean(req.admin) });
 });
 
@@ -481,7 +494,7 @@ app.delete('/api/admin/materiais/:id', exigirAdmin, async (req, res) => {
 });
 
 // Perguntas ao admin: a pessoa vê só as suas; o admin vê todas e responde.
-app.get('/api/perguntas', exigirLeitorForum, async (req, res) => {
+app.get('/api/perguntas', exigirPessoa, async (req, res) => {
   res.json({ perguntas: await db.perguntas(req.admin ? null : req.usuario.id), admin: Boolean(req.admin) });
 });
 

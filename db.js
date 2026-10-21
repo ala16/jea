@@ -11,7 +11,7 @@ const SCHEMA = `
     id SERIAL PRIMARY KEY,
     cpf TEXT NOT NULL UNIQUE,
     nome TEXT NOT NULL,
-    tipo TEXT NOT NULL CHECK (tipo IN ('especialista', 'instrutor')),
+    tipo TEXT NOT NULL CHECK (tipo IN ('especialista', 'instrutor', 'gestor')),
     foto TEXT,
     criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
   );
@@ -78,6 +78,14 @@ const SCHEMA = `
   ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS redes JSONB;
   -- E-mail de contato (obrigatório nos cadastros novos; só o gestor vê).
   ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS email TEXT;
+  -- O gestor também tem perfil (foto, redes...): uma linha com tipo 'gestor' e cpf 'gestor'.
+  DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'usuarios_tipo_check'
+                     AND pg_get_constraintdef(oid) LIKE '%gestor%') THEN
+      ALTER TABLE usuarios DROP CONSTRAINT IF EXISTS usuarios_tipo_check;
+      ALTER TABLE usuarios ADD CONSTRAINT usuarios_tipo_check CHECK (tipo IN ('especialista', 'instrutor', 'gestor'));
+    END IF;
+  END $$;
 
   -- Materiais (links do Google Drive, cartilhas...). Só o admin publica; todos veem.
   CREATE TABLE IF NOT EXISTS materiais (
@@ -151,6 +159,17 @@ const todos = async (sql, params) => (await q(sql, params)).rows;
 module.exports = {
   usuarioPorCpf: (cpf) => um('SELECT * FROM usuarios WHERE cpf = $1', [cpf]),
 
+  // Perfil do gestor: criado na primeira vez que ele entra.
+  async gestor() {
+    return (
+      (await um("SELECT * FROM usuarios WHERE cpf = 'gestor'")) ||
+      (await um(
+        `INSERT INTO usuarios (cpf, nome, tipo, redes) VALUES ('gestor', 'Gestor do JEA', 'gestor', '{}')
+         ON CONFLICT (cpf) DO UPDATE SET cpf = excluded.cpf RETURNING *`
+      ))
+    );
+  },
+
   criarUsuario: ({ cpf, nome, email, tipo, foto, redes }) =>
     um(
       'INSERT INTO usuarios (cpf, nome, email, tipo, foto, redes) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
@@ -169,7 +188,7 @@ module.exports = {
     todos(
       `SELECT u.id, u.nome, u.tipo, u.foto,
               (SELECT COUNT(*)::int FROM turmas t WHERE t.usuario_id = u.id) AS turmas
-         FROM usuarios u ORDER BY u.nome`
+         FROM usuarios u ORDER BY u.tipo = 'gestor' DESC, u.nome`
     ),
 
   // O que outros participantes podem ver: turmas (sem o conteúdo dos módulos) e postagens do fórum.
@@ -279,7 +298,7 @@ module.exports = {
               (SELECT COUNT(*)::int FROM modulos m JOIN turmas t ON t.id = m.turma_id WHERE t.usuario_id = u.id) AS envios,
               (SELECT COUNT(*)::int FROM modulos m JOIN turmas t ON t.id = m.turma_id
                 WHERE t.usuario_id = u.id AND m.feedback IS NULL) AS sem_feedback
-         FROM usuarios u ORDER BY u.nome`
+         FROM usuarios u WHERE u.tipo <> 'gestor' ORDER BY u.nome`
     ),
 
   todosEnvios: (usuarioId) =>

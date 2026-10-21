@@ -172,7 +172,22 @@ function topoDoUsuario(u) {
   api('/api/mensagens/nao-lidas').then(({ total }) => mostrarMensagensNaoLidas(total)).catch(() => {});
 }
 
-function topoDoAdmin() {
+// O perfil do gestor é carregado uma vez e reaproveitado no topo das telas.
+let gestorCache = null;
+async function carregarGestor() {
+  try {
+    gestorCache = (await api('/api/gestor')).usuario;
+  } catch {
+    gestorCache = null;
+  }
+  return gestorCache;
+}
+
+function chipDoGestor(g) {
+  return `<a class="meu-perfil" href="#/perfil" title="Editar meu perfil">${avatar(g?.foto)}<span>${esc(g ? g.nome.split(' ')[0] : 'Gestor')} · Gestor</span><span class="lapis" aria-hidden="true">✎</span></a>`;
+}
+
+function topoDoAdmin(g = gestorCache) {
   desenharTopo(`<nav class="menu" aria-label="Menu principal">
       ${itemMenu('#/admin', 'admin', 'envios', 'Envios')}
       ${itemMenu('#/admin-avisos', 'admin-avisos', 'avisos', 'Avisos')}
@@ -180,9 +195,15 @@ function topoDoAdmin() {
       ${itemMenu('#/perguntas', 'perguntas', 'perguntas', 'Perguntas', 'badge-perguntas')}
       ${itemMenu('#/forum/geral', 'forum', 'forum', 'Fórum')}
       ${itemMenu('#/participantes', 'participantes perfil', 'participantes', 'Participantes')}
+      ${itemMenu('#/mensagens', 'mensagens', 'mensagens', 'Mensagens', 'badge-mensagens')}
     </nav>
-    <div class="usuario"><span>Gestor</span><button data-sair>Sair</button></div>`, '#/admin');
+    <div class="usuario"><span id="chip-gestor" style="display:contents">${chipDoGestor(g)}</span><button data-sair>Sair</button></div>`, '#/admin');
+  if (!g) carregarGestor().then((novo) => {
+    const chip = document.getElementById('chip-gestor');
+    if (chip && novo) chip.innerHTML = chipDoGestor(novo);
+  });
   api('/api/perguntas').then(({ perguntas }) => mostrarPendentes(perguntas)).catch(() => {});
+  api('/api/mensagens/nao-lidas').then(({ total }) => mostrarMensagensNaoLidas(total)).catch(() => {});
 }
 
 function mostrarMensagensNaoLidas(n) {
@@ -276,9 +297,9 @@ const OBRIG = '<span class="obrig" aria-hidden="true">*</span>';
 const OPCIONAL = '<span class="tag-opcional">opcional</span>';
 
 // Campos de WhatsApp e redes sociais, usados no cadastro e no perfil.
-function campoWhatsapp(redes = {}) {
-  return `<label for="r_whatsapp">WhatsApp ${OBRIG} <span class="ajuda">(só o número com DDD)</span></label>
-    <input id="r_whatsapp" name="whatsapp" type="tel" inputmode="numeric" maxlength="16" autocomplete="tel-national" placeholder="(16) 99999-8888" value="${esc(redes.whatsapp ? formatarWhatsapp(redes.whatsapp) : '')}" required>`;
+function campoWhatsapp(redes = {}, opcional = false) {
+  return `<label for="r_whatsapp">WhatsApp ${opcional ? OPCIONAL : OBRIG} <span class="ajuda">(só o número com DDD)</span></label>
+    <input id="r_whatsapp" name="whatsapp" type="tel" inputmode="numeric" maxlength="16" autocomplete="tel-national" placeholder="(16) 99999-8888" value="${esc(redes.whatsapp ? formatarWhatsapp(redes.whatsapp) : '')}"${opcional ? '' : ' required'}>`;
 }
 
 // Links das redes sociais (opcionais), usados no cadastro e no perfil.
@@ -373,6 +394,16 @@ async function exigirUsuario() {
   if (!r.usuario) { ir('#/cadastro'); return null; }
   topoDoUsuario(r.usuario);
   return r.usuario;
+}
+
+// Telas que o gestor também usa (perfil e mensagens): devolve o participante ou o gestor.
+async function exigirPessoa() {
+  const r = await carregarUsuario();
+  if (r) return exigirUsuario();
+  const g = await carregarGestor();
+  if (!g) { ir('#/'); return null; }
+  topoDoAdmin(g);
+  return g;
 }
 
 function barraProgresso(n) {
@@ -947,14 +978,17 @@ function linksRedes(redes) {
 }
 
 async function telaPerfil() {
-  const u = await exigirUsuario();
+  const u = await exigirPessoa();
   if (!u) return;
+  const gestor = u.tipo === 'gestor';
   const redes = u.redes || {};
-  const faltando = [!u.email && 'o seu e-mail', !redes.whatsapp && 'o seu WhatsApp'].filter(Boolean);
+  const faltando = [!u.email && 'o seu e-mail', !gestor && !redes.whatsapp && 'o seu WhatsApp'].filter(Boolean);
   app.innerHTML = `
-    <p><a href="#/painel">← Minhas turmas</a></p>
+    <p>${gestor ? '<a href="#/admin">← Painel do gestor</a>' : '<a href="#/painel">← Minhas turmas</a>'}</p>
     <h1>Meu perfil</h1>
-    <p class="sub">Os campos com ${OBRIG} são obrigatórios; o resto é opcional. Seu e-mail e CPF só o gestor vê; o WhatsApp aparece no seu perfil.</p>
+    <p class="sub">Os campos com ${OBRIG} são obrigatórios; o resto é opcional. ${gestor
+      ? 'Seu perfil aparece em Participantes, no fórum e nas mensagens. O e-mail não aparece para ninguém; o WhatsApp, se preencher, aparece no perfil.'
+      : 'Seu e-mail e CPF só o gestor vê; o WhatsApp aparece no seu perfil.'}</p>
     ${faltando.length ? `<p class="alerta-email">Falta ${faltando.join(' e ')}. Preencha abaixo e salve o perfil.</p>` : ''}
     <form id="f" class="cartao">
       <label style="margin-top:0">Foto do perfil ${OPCIONAL} <span class="ajuda">(até 5MB)</span></label>
@@ -969,9 +1003,9 @@ async function telaPerfil() {
       <input id="nome" name="nome" type="text" maxlength="200" value="${esc(u.nome)}" required>
       <label for="email">E-mail ${OBRIG}</label>
       <input id="email" name="email" type="email" maxlength="200" autocomplete="email" placeholder="seunome@email.com" value="${esc(u.email || '')}" required>
-      ${campoWhatsapp(redes)}
+      ${campoWhatsapp(redes, gestor)}
       <label>Perfil</label>
-      <p class="meta" style="margin:0">${u.tipo === 'especialista' ? 'Especialista' : 'Instrutor'} · CPF ${esc(mascaraCpf(u.cpf))}</p>
+      <p class="meta" style="margin:0">${gestor ? 'Gestor' : `${nomeTipo(u.tipo)} · CPF ${esc(mascaraCpf(u.cpf))}`}</p>
       <h2>Redes sociais ${OPCIONAL}</h2>
       <p class="ajuda">Cole o link do seu perfil. Deixe em branco o que não usa.</p>
       ${camposRedes(redes)}
@@ -1014,7 +1048,7 @@ async function telaPerfil() {
 }
 
 const NOME_FORUM = { geral: 'Geral', especialista: 'Especialistas', instrutor: 'Instrutores' };
-const nomeTipo = (t) => (t === 'especialista' ? 'Especialista' : 'Instrutor');
+const nomeTipo = (t) => ({ especialista: 'Especialista', instrutor: 'Instrutor', gestor: 'Gestor' })[t] || 'Instrutor';
 
 async function telaVerPerfil(id) {
   const minhaRota = rotaAtual;
@@ -1031,6 +1065,7 @@ async function telaVerPerfil(id) {
   if (minhaRota !== rotaAtual) return;
   const { perfil, turmas, postagens } = dados;
   const meu = leitor.usuario?.id === perfil.id;
+  const gestor = perfil.tipo === 'gestor';
   app.innerHTML = `
     <p><a href="#/participantes">← Participantes</a></p>
     <div class="cartao perfil-publico">
@@ -1042,11 +1077,11 @@ async function telaVerPerfil(id) {
         <p class="linha-botoes">
           ${meu ? '<a class="botao" href="#/perfil">Editar meu perfil</a>' : ''}
           ${!meu && leitor.usuario ? `<a class="botao" href="#/mensagens/${perfil.id}">Enviar mensagem</a>` : ''}
-          ${leitor.admin ? `<a class="botao secundario" href="#/admin/usuario/${perfil.id}">Ver envios (gestor)</a>` : ''}
+          ${leitor.admin && !gestor ? `<a class="botao secundario" href="#/admin/usuario/${perfil.id}">Ver envios (gestor)</a>` : ''}
         </p>
       </div>
     </div>
-    <h2>Turmas <span class="meta">(${turmas.length})</span></h2>
+    ${gestor ? '' : `<h2>Turmas <span class="meta">(${turmas.length})</span></h2>
     <div class="lista-turmas">
       ${turmas.map((t) => `
         <div class="cartao turma">
@@ -1057,7 +1092,7 @@ async function telaVerPerfil(id) {
           <div class="meta">${t.modulos_enviados} de 8 módulos enviados</div>
         </div>`).join('')}
     </div>
-    ${turmas.length ? '' : '<div class="vazio">Nenhuma turma cadastrada.</div>'}
+    ${turmas.length ? '' : '<div class="vazio">Nenhuma turma cadastrada.</div>'}`}
     <h2>Postagens no fórum <span class="meta">(${postagens.length})</span></h2>
     ${postagens.map((p) => `
       <a class="cartao topico" href="#/forum/topico/${p.topico_id}">
@@ -1085,7 +1120,7 @@ async function telaParticipantes() {
   const filtro = { tipo: '', busca: '' };
   app.innerHTML = `
     <h1>Participantes</h1>
-    <p class="sub">Especialistas e instrutores cadastrados. Abra o perfil para ver as turmas e as postagens no fórum${leitor.usuario ? ', ou envie uma mensagem' : ''}.</p>
+    <p class="sub">O gestor, os especialistas e os instrutores cadastrados. Abra o perfil para ver as turmas e as postagens no fórum${leitor.usuario ? ', ou envie uma mensagem' : ''}.</p>
     <nav class="abas" id="abas">
       <a href="#" data-tipo="" class="ativa">Todos (${participantes.length})</a>
       <a href="#" data-tipo="especialista">Especialistas (${contar('especialista')})</a>
@@ -1103,7 +1138,7 @@ async function telaParticipantes() {
         <div class="info">
           <h3>${esc(p.nome)}</h3>
           <span class="tag">${nomeTipo(p.tipo)}</span>
-          <div class="meta">${p.turmas} turma${p.turmas === 1 ? '' : 's'}</div>
+          ${p.tipo === 'gestor' ? '' : `<div class="meta">${p.turmas} turma${p.turmas === 1 ? '' : 's'}</div>`}
         </div>
         <div class="acoes">
           <a class="botao secundario" href="#/perfil/${p.id}">Ver perfil</a>
@@ -1126,12 +1161,12 @@ async function telaParticipantes() {
 // ---------- mensagens ----------
 
 async function telaMensagens() {
-  const u = await exigirUsuario();
+  const u = await exigirPessoa();
   if (!u) return;
   const { conversas } = await api('/api/mensagens');
   app.innerHTML = `
     <div class="cabecalho">
-      <div><h1>Mensagens</h1><p class="sub">Converse com outros especialistas e instrutores.</p></div>
+      <div><h1>Mensagens</h1><p class="sub">Converse com o gestor, os especialistas e os instrutores.</p></div>
       <a class="botao-grande" href="#/participantes">+ Nova mensagem</a>
     </div>
     ${conversas.map((c) => `
@@ -1146,7 +1181,7 @@ async function telaMensagens() {
 }
 
 async function telaConversa(id) {
-  const u = await exigirUsuario();
+  const u = await exigirPessoa();
   if (!u) return;
   let dados;
   try {
@@ -1507,13 +1542,18 @@ async function leitorDoForum() {
     ir('#/cadastro');
     return null;
   }
-  topoDoAdmin();
-  return { admin: true };
+  const g = await carregarGestor();
+  if (!g) {
+    ir('#/');
+    return null;
+  }
+  topoDoAdmin(g);
+  return { admin: true, usuario: g };
 }
 
 function autor(item, link = true) {
   const foto = avatar(item.autor_foto, 'pequeno');
-  const tipo = item.autor_tipo === 'especialista' ? 'Especialista' : item.autor_tipo === 'instrutor' ? 'Instrutor' : '';
+  const tipo = item.autor_tipo ? nomeTipo(item.autor_tipo) : '';
   const nome = link && item.usuario_id
     ? `<a href="#/perfil/${item.usuario_id}"><strong>${esc(item.autor || 'Usuário')}</strong></a>`
     : `<strong>${esc(item.autor || 'Usuário removido')}</strong>`;
