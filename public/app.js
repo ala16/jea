@@ -4,6 +4,7 @@ const app = document.getElementById('app');
 const topoUsuario = document.getElementById('topo-usuario');
 const CAMPOS = window.MODULO1_ESPECIALISTA_CAMPOS;
 const CAMPOS_EXPEDICAO = window.EXPEDICAO_CAMPOS;
+const { lerValor, formatarReais } = window;
 const AREAS = {
   modulo: { nome: 'Módulo', plural: 'módulos', rota: '' },
   expedicao: { nome: 'Expedição', plural: 'expedições', rota: 'expedicao/' },
@@ -655,11 +656,107 @@ function campoTexto({ chave, rotulo, ajuda, linha, max }, valor) {
   </div>`;
 }
 
+// Antes das tabelas, cronograma e orçamento eram texto livre: o que já foi escrito continua à mostra.
+function textoAnterior(dados, chave) {
+  return typeof dados[chave] === 'string' ? dados[chave] : dados[`${chave}_anterior`] || '';
+}
+
+function linhasDe(dados, chave) {
+  return Array.isArray(dados[chave]) ? dados[chave] : [];
+}
+
+function totalTabela(c, linhas) {
+  const col = c.colunas.find((x) => x.valor);
+  return col ? linhas.reduce((s, l) => s + (lerValor(l?.[col.chave]) || 0), 0) : null;
+}
+
+function campoTabela(c, dados) {
+  const linhas = linhasDe(dados, c.chave);
+  const anterior = textoAnterior(dados, c.chave);
+  const temValor = c.colunas.some((x) => x.valor);
+  const celula = (col, l, n) => {
+    const v = l?.[col.chave];
+    const rot = `${col.rotulo} do módulo ${n}`;
+    if (col.valor) {
+      const txt = v == null || v === '' ? '' : Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return `<input type="text" inputmode="decimal" data-col="${col.chave}" data-valor="1" aria-label="${esc(rot)}" placeholder="${esc(col.exemplo || '')}" value="${esc(txt)}">`;
+    }
+    if (col.max > 100) return `<textarea data-col="${col.chave}" maxlength="${col.max}" aria-label="${esc(rot)}">${esc(v)}</textarea>`;
+    return `<input type="text" data-col="${col.chave}" maxlength="${col.max}" aria-label="${esc(rot)}" placeholder="${esc(col.exemplo || '')}" value="${esc(v)}">`;
+  };
+  return `<div class="campo-tabela" data-tabela="${c.chave}">
+    <label>${esc(c.rotulo)}<span class="ok" hidden>✓</span></label>
+    ${c.ajuda ? `<p class="ajuda">${esc(c.ajuda)}</p>` : ''}
+    ${anterior ? `<div class="texto-anterior">
+      <label for="c_${c.chave}_anterior">O que você já tinha escrito</label>
+      <p class="ajuda">Passe estas informações para a tabela abaixo. Quando terminar, apague este texto e salve.</p>
+      <textarea id="c_${c.chave}_anterior" name="${c.chave}_anterior" maxlength="${MAX}">${esc(anterior)}</textarea><div class="contador"></div>
+    </div>` : ''}
+    <div class="tabela"><table class="tabela-modulos">
+      <thead><tr><th>Módulo</th>${c.colunas.map((col) => `<th>${esc(col.rotulo)}</th>`).join('')}</tr></thead>
+      <tbody>${[1, 2, 3, 4, 5, 6, 7, 8].map((n) => `<tr>
+        <th scope="row">Módulo ${n}</th>
+        ${c.colunas.map((col) => `<td data-rotulo="${esc(col.rotulo)}">${celula(col, linhas[n - 1], n)}</td>`).join('')}
+      </tr>`).join('')}</tbody>
+      ${temValor ? `<tfoot><tr><th>Total geral</th><td colspan="${c.colunas.length}" class="total">${formatarReais(totalTabela(c, linhas))}</td></tr></tfoot>` : ''}
+    </table></div>
+  </div>`;
+}
+
+// Liga o ✓ e o total de uma tabela de módulos e devolve uma função que lê as linhas.
+function ligarTabela(div) {
+  const ok = div.querySelector(':scope > label .ok');
+  const total = div.querySelector('.total');
+  const ler = () => [...div.querySelectorAll('tbody tr')].map((tr) => Object.fromEntries(
+    [...tr.querySelectorAll('[data-col]')].map((el) => [el.dataset.col, el.value]),
+  ));
+  const atualizar = () => {
+    if (ok) ok.hidden = !ler().some((l) => Object.values(l).some((v) => v.trim()));
+    if (total) {
+      let soma = 0;
+      for (const el of div.querySelectorAll('[data-valor]')) {
+        const n = lerValor(el.value);
+        el.classList.toggle('invalido', Boolean(el.value.trim()) && n == null);
+        soma += n || 0;
+      }
+      total.textContent = formatarReais(soma);
+    }
+  };
+  div.addEventListener('input', atualizar);
+  atualizar();
+  return ler;
+}
+
+// Cronograma/orçamento enviados: tabela para ler e texto para comparar no histórico.
+function leituraTabela(c, dados) {
+  const linhas = linhasDe(dados, c.chave);
+  const anterior = textoAnterior(dados, c.chave);
+  const vazio = (v) => v == null || v === '';
+  const preenchidas = linhas.filter((l) => c.colunas.some((col) => !vazio(l?.[col.chave])));
+  const temValor = c.colunas.some((x) => x.valor);
+  const cel = (col, l) => (col.valor ? (vazio(l?.[col.chave]) ? '' : formatarReais(l[col.chave])) : l?.[col.chave] || '');
+  const total = formatarReais(totalTabela(c, linhas));
+
+  const partes = anterior ? [`Texto livre: ${anterior}`] : [];
+  for (const l of preenchidas) partes.push(`Módulo ${l.modulo}: ${c.colunas.map((col) => cel(col, l) || '—').join(' · ')}`);
+  if (temValor && preenchidas.length) partes.push(`Total geral: ${total}`);
+
+  let html = anterior ? `<div class="texto-anterior-leitura"><span class="meta">Texto livre:</span>\n${esc(anterior)}</div>` : '';
+  if (preenchidas.length) {
+    html += `<div class="tabela"><table class="tabela-modulos leitura">
+      <thead><tr><th>Módulo</th>${c.colunas.map((col) => `<th${col.valor ? ' class="num"' : ''}>${esc(col.rotulo)}</th>`).join('')}</tr></thead>
+      <tbody>${[1, 2, 3, 4, 5, 6, 7, 8].map((n) => `<tr><th scope="row">Módulo ${n}</th>${c.colunas.map((col) => `<td${col.valor ? ' class="num"' : ''}>${esc(cel(col, linhas[n - 1])) || '<span class="meta">—</span>'}</td>`).join('')}</tr>`).join('')}</tbody>
+      ${temValor ? `<tfoot><tr><th>Total geral</th><td colspan="${c.colunas.length}">${esc(total)}</td></tr></tfoot>` : ''}
+    </table></div>`;
+  }
+  return { texto: partes.join('\n'), html };
+}
+
 function formModulo1Especialista(m) {
   const dados = m?.dados || {};
   return `<div class="grupo"><h2 style="margin-top:0">${esc(CAMPOS[0].grupo)}</h2>
       <p class="ajuda">Preencha cada item para estruturar formalmente o Planejamento da sua turma.</p>
-      ${CAMPOS.filter((c) => c.chave).map((c) => campoTexto(c, dados[c.chave])).join('')}
+      ${CAMPOS.filter((c) => c.chave).map((c) => (c.tabela ? campoTabela(c, dados) : campoTexto(c, dados[c.chave]))).join('')}
       ${campoArquivos('anexos', `Anexos ${OPCIONAL}`, { atuais: m?.anexos })}
     </div>`;
 }
@@ -798,8 +895,9 @@ async function telaTurma(turmaId, area, numero, editando = false) {
   }
   const cancelar = document.getElementById('cancelar');
   if (cancelar) cancelar.onclick = () => telaTurma(turma.id, area, numero);
-  f.querySelectorAll('textarea').forEach(contador);
-  f.querySelectorAll('input[type=text]').forEach((i) => {
+  const tabelas = [...f.querySelectorAll('[data-tabela]')].map((div) => [div.dataset.tabela, ligarTabela(div)]);
+  f.querySelectorAll('textarea[name]').forEach(contador);
+  f.querySelectorAll('input[type=text][name]').forEach((i) => {
     const ok = i.parentElement.querySelector('.ok');
     const atualizar = () => ok && (ok.hidden = !i.value.trim());
     i.addEventListener('input', atualizar);
@@ -811,7 +909,13 @@ async function telaTurma(turmaId, area, numero, editando = false) {
     botao.disabled = true;
     try {
       const corpo = {};
-      for (const el of f.querySelectorAll('input[type=text], textarea')) corpo[el.name] = el.value;
+      for (const el of f.querySelectorAll('input[type=text][name], textarea[name]')) corpo[el.name] = el.value;
+      for (const [chave, ler] of tabelas) {
+        const linhas = ler();
+        const ruim = linhas.findIndex((l) => l.valor?.trim() && lerValor(l.valor) == null);
+        if (ruim >= 0) throw new Error(`Valor inválido no orçamento do módulo ${ruim + 1}. Use só números, por exemplo 1.250,00.`);
+        corpo[chave] = linhas;
+      }
       corpo.removerAnexos = [...f.querySelectorAll('input[name=removerAnexos]:checked')].map((c) => c.value);
       corpo.anexos = await enviarArquivos(f.anexos.files, instrutor || expedicao, botao);
       await api(`/api/turmas/${turma.id}/${expedicao ? 'expedicoes' : 'modulos'}/${numero}`, { json: corpo });
@@ -1007,14 +1111,23 @@ function datasEnvio(e) {
   return `${enviado} · editado ${n === 1 ? '1 vez' : `${n} vezes`}, a última em ${esc(formatarData(e.atualizado_em))}`;
 }
 
-// Campos de um envio como [rótulo, valor], na ordem do formulário.
+// Campos de um envio como [rótulo, valor, html?], na ordem do formulário. As tabelas
+// trazem o html para ler e o valor em texto, que o histórico compara.
 // As versões do histórico não trazem a área: vem do envio atual.
 function camposEnvio(e, area = e.area) {
   const itens = [];
   if (area === 'expedicao') {
     for (const c of CAMPOS_EXPEDICAO) itens.push([c.rotulo, e.dados?.[c.chave]]);
   } else if (e.dados) {
-    for (const c of CAMPOS) if (c.chave) itens.push([c.rotulo, e.dados[c.chave]]);
+    for (const c of CAMPOS) {
+      if (!c.chave) continue;
+      if (!c.tabela) {
+        itens.push([c.rotulo, e.dados[c.chave]]);
+        continue;
+      }
+      const { texto, html } = leituraTabela(c, e.dados);
+      itens.push([c.rotulo, texto, html]);
+    }
   } else {
     itens.push(['Texto', e.texto]);
   }
@@ -1053,7 +1166,7 @@ function historicoEnvio(e) {
 
 function detalheEnvio(e, mostrarFeedback = true) {
   const itens = camposEnvio(e);
-  return `<dl>${itens.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v) || '<span class="meta">(vazio)</span>'}</dd>`).join('')}</dl>
+  return `<dl>${itens.map(([k, v, html]) => `<dt>${esc(k)}</dt><dd>${html || esc(v) || '<span class="meta">(vazio)</span>'}</dd>`).join('')}</dl>
     ${blocoAnexos(e.anexos)}
     ${mostrarFeedback && e.feedback ? `<div class="feedback" style="margin-top:12px"><strong>Feedback enviado (${esc(formatarData(e.feedback_em))}):</strong>\n${esc(e.feedback)}</div>` : ''}
     ${historicoEnvio(e)}`;

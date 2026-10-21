@@ -521,3 +521,31 @@ input[type=file]:hover { border-color: var(--verde); }
   .modulos a { padding: 10px; gap: 8px; }
   .mod-num { width: 30px; height: 30px; }
 }
+
+/* Cronograma e orçamento: uma linha por módulo */
+.tabela-modulos { white-space: normal; }
+.tabela-modulos th[scope=row] { white-space: nowrap; width: 1%; background: #f6f8f6; }
+.tabela-modulos td { padding: 6px; }
+.tabela-modulos input[type=text], .tabela-modulos textarea { margin: 0; }
+.tabela-modulos textarea { min-height: 44px; }
+.tabela-modulos input[data-valor] { text-align: right; min-width: 110px; }
+.tabela-modulos input.invalido { outline: 2px solid var(--erro); outline-offset: -1px; }
+.tabela-modulos tfoot th, .tabela-modulos tfoot td { font-weight: 700; background: #eef2ef; border-bottom: 0; }
+.tabela-modulos tfoot th { white-space: nowrap; }
+.tabela-modulos tfoot td { text-align: right; padding-right: 16px; }
+.tabela-modulos.leitura td { padding: 8px 10px; }
+.texto-anterior { background: #fffbea; border: 1px solid #f0e2a8; border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+.texto-anterior-leitura { margin-bottom: 8px; }
+@media (max-width: 600px) {
+  .campo-tabela .tabela { overflow: visible; border: 0; }
+  .tabela-modulos:not(.leitura) thead { display: none; }
+  .tabela-modulos:not(.leitura), .tabela-modulos:not(.leitura) tbody, .tabela-modulos:not(.leitura) tr,
+  .tabela-modulos:not(.leitura) th, .tabela-modulos:not(.leitura) td { display: block; width: auto; }
+  .tabela-modulos:not(.leitura) tbody tr { border: 1px solid var(--borda); border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
+  .tabela-modulos:not(.leitura) td { border: 0; padding: 4px 10px 8px; }
+  .tabela-modulos:not(.leitura) td::before { content: attr(data-rotulo); display: block; font-size: 13px; color: var(--suave); margin-bottom: 2px; }
+  .tabela-modulos:not(.leitura) tfoot { display: block; }
+  .tabela-modulos:not(.leitura) tfoot tr { background: #eef2ef; display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--borda); border-radius: 10px; overflow: hidden; }
+  .tabela-modulos:not(.leitura) tfoot td::before { content: none; }
+}
+.tabela-modulos.leitura .num { text-align: right; white-space: nowrap; }

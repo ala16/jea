@@ -225,6 +225,32 @@ test('fluxo do especialista, instrutor e feedback em massa', async () => {
   await adm('/api/admin/expedicoes-ocultas', { json: { ocultas: [] } });
   assert.equal((await a(`/api/turmas/${turmaId}/expedicoes/2`, { json: { expedicao_local: 'x' } })).status, 200);
 
+  // Cronograma e orçamento em tabela: uma linha por módulo, valores em reais.
+  const tabelas = {
+    titulo: 'teste 3',
+    cronograma: [{ data: 'março/2026', descricao: 'Abertura' }, {}, { data: 'maio', descricao: 'Visita' }],
+    orcamento: [{ descricao: 'Sementes', valor: '1.250,50' }, { valor: 'R$ 100' }, { valor: 'abc' }],
+    orcamento_anterior: 'texto antigo',
+  };
+  const antes = (await a(`/api/turmas/${turmaId}`)).body.modulos.find((m) => m.numero === 1).edicoes;
+  r = await a(`/api/turmas/${turmaId}/modulos/1`, { json: tabelas });
+  assert.equal(r.status, 200);
+  const { cronograma, orcamento } = r.body.modulo.dados;
+  assert.equal(cronograma.length, 8);
+  assert.deepEqual(cronograma[0], { modulo: 1, data: 'março/2026', descricao: 'Abertura' });
+  assert.deepEqual(cronograma[7], { modulo: 8, data: '', descricao: '' });
+  assert.equal(orcamento[0].valor, 1250.5);
+  assert.equal(orcamento[1].valor, 100);
+  assert.equal(orcamento[2].valor, null);
+  assert.equal(r.body.modulo.dados.orcamento_anterior, 'texto antigo');
+  assert.equal(r.body.modulo.dados.cronograma_anterior, undefined);
+  // Mesmas tabelas de novo não contam como edição.
+  await a(`/api/turmas/${turmaId}/modulos/1`, { json: tabelas });
+  assert.equal((await a(`/api/turmas/${turmaId}`)).body.modulos.find((m) => m.numero === 1).edicoes, antes + 1);
+  // Tabela em branco fica vazia.
+  r = await a(`/api/turmas/${turmaId}/modulos/1`, { json: { titulo: 'teste 3', cronograma: [{ data: ' ' }] } });
+  assert.equal(r.body.modulo.dados.cronograma, null);
+
   // Excluir turma: só o dono, e some da lista
   assert.equal((await b(`/api/turmas/${turmaId}`, { method: 'DELETE' })).status, 404);
   assert.equal((await a(`/api/turmas/${turmaId}`, { method: 'DELETE' })).status, 200);

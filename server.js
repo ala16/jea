@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const express = require('express');
 const db = require('./db');
 const arquivos = require('./arquivos');
-const { MODULO1_ESPECIALISTA_CAMPOS, EXPEDICAO_CAMPOS } = require('./public/campos');
+const { MODULO1_ESPECIALISTA_CAMPOS, EXPEDICAO_CAMPOS, lerValor } = require('./public/campos');
 
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
@@ -320,7 +320,11 @@ app.post('/api/turmas', exigirUsuario, async (req, res) => {
 
 function mudou(antes, depois) {
   const chaves = new Set([...Object.keys(antes.dados || {}), ...Object.keys(depois.dados || {})]);
-  if ([...chaves].some((k) => (antes.dados?.[k] || '') !== (depois.dados?.[k] || ''))) return true;
+  // O JSONB devolve as chaves em outra ordem: compara com as chaves ordenadas.
+  const ordenar = (v) => (Array.isArray(v) ? v.map(ordenar)
+    : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, ordenar(v[k])])) : v);
+  const valor = (v) => (v && typeof v === 'object' ? JSON.stringify(ordenar(v)) : v || '');
+  if ([...chaves].some((k) => valor(antes.dados?.[k]) !== valor(depois.dados?.[k]))) return true;
   if ((antes.texto || '') !== (depois.texto || '')) return true;
   const urls = (l) => (l || []).map((a) => a.url).join('\n');
   return urls(antes.anexos) !== urls(depois.anexos);
@@ -383,8 +387,30 @@ async function salvarEnvio(req, res, area, numero, { dados, texto: textoEnvio, i
 
 function lerCampos(body, campos) {
   const dados = {};
-  for (const c of campos) dados[c.chave] = texto(body[c.chave], c.max || MAX_TEXTO);
+  for (const c of campos) {
+    if (!c.tabela) {
+      dados[c.chave] = texto(body[c.chave], c.max || MAX_TEXTO);
+      continue;
+    }
+    dados[c.chave] = linhasTabela(c, body[c.chave]);
+    // Texto livre de antes das tabelas: fica guardado enquanto a pessoa não apagar.
+    const anterior = texto(body[`${c.chave}_anterior`]).trim();
+    if (anterior) dados[`${c.chave}_anterior`] = anterior;
+  }
   return dados;
+}
+
+// Tabela com uma linha por módulo (1 a 8); null quando nada foi preenchido.
+function linhasTabela(campo, v) {
+  const recebidas = Array.isArray(v) ? v : [];
+  const linhas = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => {
+    const l = recebidas[i] && typeof recebidas[i] === 'object' ? recebidas[i] : {};
+    const r = { modulo: i + 1 };
+    for (const col of campo.colunas) r[col.chave] = col.valor ? lerValor(l[col.chave]) : texto(l[col.chave], col.max).trim();
+    return r;
+  });
+  const preenchida = linhas.some((l) => campo.colunas.some((col) => l[col.chave] != null && l[col.chave] !== ''));
+  return preenchida ? linhas : null;
 }
 
 function numeroValido(v) {
