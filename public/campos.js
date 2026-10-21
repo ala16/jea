@@ -11,8 +11,22 @@
     { chave: 'visao', rotulo: 'Visão', ajuda: 'Onde o projeto pretende chegar? Qual o futuro almejado?' },
     { chave: 'valores', rotulo: 'Valores', ajuda: 'Quais princípios guiam o projeto? (Ex: sustentabilidade, ética, inovação...)' },
     { chave: 'metas', rotulo: 'Metas', ajuda: 'Quais resultados concretos e mensuráveis pretende atingir? (Ex: formar 30 jovens até dezembro)' },
-    { chave: 'cronograma', rotulo: 'Cronograma dos 8 módulos', ajuda: 'Detalhe as datas e atividades previstas para cada um dos 8 módulos do Programa.' },
-    { chave: 'orcamento', rotulo: 'Orçamento dos 8 módulos', ajuda: 'Detalhe o orçamento previsto para os 8 módulos do Programa: materiais, insumos, e demais custos. Apresente os valores por módulo e o total geral.' },
+    {
+      chave: 'cronograma', rotulo: 'Cronograma dos 8 módulos', tabela: true,
+      ajuda: 'Para cada módulo, informe a data ou o mês e descreva o que será trabalhado.',
+      colunas: [
+        { chave: 'data', rotulo: 'Data / mês', max: 60, exemplo: 'Ex: março/2026' },
+        { chave: 'descricao', rotulo: 'O que será trabalhado', max: 500 },
+      ],
+    },
+    {
+      chave: 'orcamento', rotulo: 'Orçamento dos 8 módulos', tabela: true,
+      ajuda: 'Para cada módulo, informe o que será gasto (materiais, insumos e demais custos) e o valor. O total geral é somado sozinho.',
+      colunas: [
+        { chave: 'descricao', rotulo: 'Materiais, insumos e custos', max: 500 },
+        { chave: 'valor', rotulo: 'Valor (R$)', valor: true, exemplo: '0,00' },
+      ],
+    },
   ].map(comMax);
 
   // As 8 expedições têm os mesmos campos (e as fotos). As chaves são as que o módulo 1 usava,
@@ -24,6 +38,22 @@
     { chave: 'expedicao_resultado', rotulo: 'Resultado', ajuda: 'Quais resultados foram (ou são esperados) com a expedição?' },
   ].map(comMax);
 
-  if (typeof module !== 'undefined') module.exports = { MODULO1_ESPECIALISTA_CAMPOS, EXPEDICAO_CAMPOS };
-  else Object.assign(raiz, { MODULO1_ESPECIALISTA_CAMPOS, EXPEDICAO_CAMPOS });
+  // Lê um valor em reais escrito à brasileira ("1.234,56", "R$ 50") e devolve o número, ou null.
+  function lerValor(v) {
+    if (typeof v === 'number') return Number.isFinite(v) && v >= 0 ? Math.round(v * 100) / 100 : null;
+    let s = String(v ?? '').replace(/R\$|\s/gi, '');
+    if (!s) return null;
+    if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+    else if ((s.match(/\./g) || []).length > 1 || /\.\d{3}$/.test(s)) s = s.replace(/\./g, '');
+    const n = Number(s);
+    return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null;
+  }
+
+  function formatarReais(n) {
+    return Number(n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  }
+
+  const exportar = { MODULO1_ESPECIALISTA_CAMPOS, EXPEDICAO_CAMPOS, lerValor, formatarReais };
+  if (typeof module !== 'undefined') module.exports = exportar;
+  else Object.assign(raiz, exportar);
 })(this);
