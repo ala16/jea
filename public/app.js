@@ -230,7 +230,8 @@ function cartaoAviso(a, { novo, apagar } = {}) {
       <div class="meta">${novo ? '<span class="tag novo">Novo</span> ' : ''}${esc(formatarData(a.criado_em))} · ${PUBLICOS[a.publico] || ''}
         ${apagar ? `<button class="link perigo" data-apagar-aviso="${a.id}">apagar</button>` : ''}</div>
       <h3>${esc(a.titulo)}</h3>
-      <div class="mensagem">${esc(a.texto)}</div>
+      ${a.texto ? `<div class="mensagem">${esc(a.texto)}</div>` : ''}
+      ${(a.imagens || []).length ? `<div class="imagens-aviso">${a.imagens.map(imagemForum).join('')}</div>` : ''}
     </article>`;
 }
 
@@ -1442,8 +1443,11 @@ async function telaAdminAvisos() {
       <label for="titulo">Título</label>
       <input id="titulo" name="titulo" type="text" maxlength="200" placeholder="Ex.: Prazo do módulo 2" required>
       <label for="texto">Mensagem</label>
-      <textarea id="texto" name="texto" maxlength="${MAX}" required></textarea>
+      <textarea id="texto" name="texto" maxlength="${MAX}"></textarea>
       <div class="contador"></div>
+      <label for="imagens">Imagens <span class="ajuda">(opcional, até 6, 5MB cada)</span></label>
+      <input id="imagens" name="imagens" type="file" accept="image/*" multiple>
+      <div class="imagens-aviso previa" id="previa"></div>
       <label>Quem vai receber</label>
       <div class="opcoes">
         <label><input type="radio" name="publico" value="todos" checked>Todos</label>
@@ -1458,18 +1462,36 @@ async function telaAdminAvisos() {
 
   const f = document.getElementById('f');
   contador(f.texto);
+  const previa = document.getElementById('previa');
+  let urlsPrevia = [];
+  f.imagens.onchange = () => {
+    urlsPrevia.forEach((u) => URL.revokeObjectURL(u));
+    urlsPrevia = [...f.imagens.files].map((arq) => URL.createObjectURL(arq));
+    previa.innerHTML = urlsPrevia.map((u) => `<img src="${u}" alt="">`).join('');
+  };
   f.onsubmit = async (e) => {
     e.preventDefault();
     const botao = f.querySelector('button[type=submit]');
     if (botao.disabled) return;
+    const arquivos = [...f.imagens.files];
+    const erro = document.getElementById('erro');
+    if (arquivos.length > 6) return (erro.textContent = 'Envie no máximo 6 imagens.');
+    if (!f.texto.value.trim() && !arquivos.length) return (erro.textContent = 'Escreva a mensagem ou anexe uma imagem.');
     botao.disabled = true;
     try {
-      await api('/api/admin/avisos', { json: { titulo: f.titulo.value, texto: f.texto.value, publico: f.publico.value } });
+      const imagens = [];
+      for (const [i, arq] of arquivos.entries()) {
+        botao.textContent = `Enviando imagem ${i + 1} de ${arquivos.length}...`;
+        imagens.push(await enviarArquivo(arq, true));
+      }
+      botao.textContent = 'Enviando aviso...';
+      await api('/api/admin/avisos', { json: { titulo: f.titulo.value, texto: f.texto.value, publico: f.publico.value, imagens } });
       avisar('Aviso enviado.');
       telaAdminAvisos();
     } catch (err) {
-      document.getElementById('erro').textContent = err.message;
+      erro.textContent = err.message;
       botao.disabled = false;
+      botao.textContent = 'Enviar aviso';
     }
   };
   app.onclick = async (ev) => {

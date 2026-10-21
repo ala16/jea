@@ -183,6 +183,11 @@ input[type=file] {
 @media (max-width: 600px) { .numeros { grid-template-columns: 1fr 1fr 1fr; gap: 6px; } .numeros strong { font-size: 22px; } }
 .aviso-item h3 { margin-top: 6px; font-size: 18px; }
 .aviso-item .mensagem { margin-top: 6px; }
+.imagens-aviso { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.imagens-aviso .imagem-forum { margin-top: 0; }
+.imagens-aviso .imagem-forum img { max-height: 320px; }
+.imagens-aviso.previa:empty { display: none; }
+.imagens-aviso.previa img { height: 90px; width: 90px; object-fit: cover; border-radius: 8px; border: 1px solid var(--borda); }
 .aviso-item.novo { border-left: 4px solid #f5b700; }
 .tag.novo { background: #f5b700; color: #1d2420; font-weight: 700; }
 .novo-topico summary { list-style: none; display: inline-block; padding: 10px 18px; border-radius: 8px; background: var(--verde); color: #fff; }

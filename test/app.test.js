@@ -238,6 +238,29 @@ test('avisos: admin publica, cada perfil vê os seus', async () => {
   assert.equal((await ins('/api/avisos')).body.avisos.length, 1);
 });
 
+test('avisos com imagens: gestor envia e os usuários veem', async () => {
+  const esp = cliente();
+  await esp('/api/entrar', { json: { cpf: CPF_B } });
+  const adm = cliente();
+  await adm('/api/admin/entrar', { json: { senha: 'segredo' } });
+
+  const img = await subir(adm, 'png', 'image/png', 'cartaz.png');
+  const pdf = await subir(adm, 'pdf', 'application/pdf', 'doc.pdf');
+  assert.equal((await adm('/api/admin/avisos', { json: { titulo: 'x', imagens: [pdf] } })).status, 400);
+  assert.equal((await adm('/api/admin/avisos', { json: { titulo: 'x', imagens: Array(7).fill(img) } })).status, 400);
+
+  const r = await adm('/api/admin/avisos', { json: { titulo: 'Cartaz do evento', texto: '', imagens: [img] } });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body.aviso.imagens, [img.url]);
+  const aviso = (await esp('/api/avisos')).body.avisos.find((a) => a.id === r.body.aviso.id);
+  assert.deepEqual(aviso.imagens, [img.url]);
+  assert.equal((await esp(img.url)).status, 200);
+  assert.equal((await cliente()(img.url)).status, 403);
+
+  assert.equal((await adm(`/api/admin/avisos/${aviso.id}`, { method: 'DELETE' })).status, 200);
+  assert.ok(!fs.existsSync(path.join(tmp, path.basename(img.url))));
+});
+
 test('perfil: editar nome, foto e redes; outros veem', async () => {
   const a = cliente();
   await a('/api/entrar', { json: { cpf: '286.255.878-87' } });

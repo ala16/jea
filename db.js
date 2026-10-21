@@ -73,6 +73,8 @@ const SCHEMA = `
     publico TEXT NOT NULL DEFAULT 'todos' CHECK (publico IN ('todos', 'especialista', 'instrutor')),
     criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
   );
+  -- Imagens anexadas ao aviso: lista de URLs.
+  ALTER TABLE avisos ADD COLUMN IF NOT EXISTS imagens JSONB NOT NULL DEFAULT '[]';
 
   -- Links de redes sociais do perfil: { instagram, facebook, linkedin, youtube, site }.
   ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS redes JSONB;
@@ -370,11 +372,23 @@ module.exports = {
       ? todos("SELECT * FROM avisos WHERE publico IN ('todos', $1) ORDER BY id DESC", [tipo])
       : todos('SELECT * FROM avisos ORDER BY id DESC'),
 
-  criarAviso: ({ titulo, texto, publico }) =>
-    um('INSERT INTO avisos (titulo, texto, publico) VALUES ($1, $2, $3) RETURNING *', [titulo, texto, publico]),
+  criarAviso: ({ titulo, texto, publico, imagens }) =>
+    um('INSERT INTO avisos (titulo, texto, publico, imagens) VALUES ($1, $2, $3, $4) RETURNING *', [
+      titulo,
+      texto,
+      publico,
+      JSON.stringify(imagens || []),
+    ]),
 
+  // Imagens de avisos podem ser vistas por qualquer pessoa logada.
+  async imagemDeAviso(url) {
+    return Boolean(await um('SELECT 1 FROM avisos WHERE imagens @> $1::jsonb', [JSON.stringify([url])]));
+  },
+
+  // Apaga e devolve as imagens do aviso (null se não existia), para remover os arquivos.
   async excluirAviso(id) {
-    return (await q('DELETE FROM avisos WHERE id = $1', [id])).rowCount;
+    const r = await um('DELETE FROM avisos WHERE id = $1 RETURNING imagens', [id]);
+    return r ? r.imagens || [] : null;
   },
 
   materiais: () => todos('SELECT * FROM materiais ORDER BY id DESC'),

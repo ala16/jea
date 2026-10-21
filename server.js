@@ -104,6 +104,12 @@ async function exigirUsuario(req, res, next) {
   });
 }
 
+// Upload: usuários com CPF e o gestor (imagens dos avisos).
+async function exigirCpfOuAdmin(req, res, next) {
+  if (sessao(req).admin) return next();
+  await exigirCpf(req, res, next);
+}
+
 function exigirAdmin(req, res, next) {
   if (!sessao(req).admin) return res.status(401).json({ erro: 'Acesso restrito ao gestor.' });
   next();
@@ -135,18 +141,18 @@ app.get('/api/config', (req, res) => {
 
 // Upload: na Vercel o navegador envia direto para o Vercel Blob (limite de 4,5MB das funções);
 // localmente o arquivo vem para o servidor e fica em disco.
-app.post('/api/blob', exigirCpf, async (req, res) => {
+app.post('/api/blob', exigirCpfOuAdmin, async (req, res) => {
   res.json(await arquivos.gerarTokenBlob(req));
 });
 
-app.post('/api/upload', exigirCpf, arquivos.uploadLocal);
+app.post('/api/upload', exigirCpfOuAdmin, arquivos.uploadLocal);
 
 app.get('/arquivos/:nome', async (req, res) => {
   const nome = path.basename(req.params.nome);
   const s = sessao(req);
   const url = `/arquivos/${nome}`;
-  // Imagens do fórum e fotos de perfil: qualquer pessoa logada vê.
-  if ((await db.imagemDoForum(url)) || (await db.fotoDePerfil(url))) {
+  // Imagens do fórum, dos avisos e fotos de perfil: qualquer pessoa logada vê.
+  if ((await db.imagemDoForum(url)) || (await db.imagemDeAviso(url)) || (await db.fotoDePerfil(url))) {
     if (!s.admin && !s.cpf) return res.sendStatus(403);
     return res.sendFile(arquivos.caminhoLocal(nome));
   }
@@ -438,6 +444,7 @@ app.delete('/api/forum/resposta/:id', exigirLeitorForum, async (req, res) => {
 
 // Avisos: o admin publica; cada usuário vê os gerais e os do seu perfil.
 const PUBLICOS = ['todos', 'especialista', 'instrutor'];
+const MAX_IMAGENS_AVISO = 6;
 
 app.get('/api/avisos', exigirLeitorForum, async (req, res) => {
   res.json({ avisos: await db.avisos(req.admin ? null : req.usuario.tipo) });
@@ -447,13 +454,18 @@ app.post('/api/admin/avisos', exigirAdmin, async (req, res) => {
   const titulo = texto(req.body.titulo, 200).trim();
   const corpo = texto(req.body.texto).trim();
   const publico = PUBLICOS.includes(req.body.publico) ? req.body.publico : 'todos';
-  if (!titulo || !corpo) return res.status(400).json({ erro: 'Escreva o título e a mensagem do aviso.' });
-  res.json({ aviso: await db.criarAviso({ titulo, texto: corpo, publico }) });
+  const lista = Array.isArray(req.body.imagens) ? req.body.imagens : [];
+  if (lista.length > MAX_IMAGENS_AVISO) return res.status(400).json({ erro: `Envie no máximo ${MAX_IMAGENS_AVISO} imagens.` });
+  const imagens = lista.map((v) => lerArquivo(v, { imagem: true })?.url).filter(Boolean);
+  if (!titulo || (!corpo && !imagens.length)) return res.status(400).json({ erro: 'Escreva o título e a mensagem do aviso.' });
+  res.json({ aviso: await db.criarAviso({ titulo, texto: corpo, publico, imagens }) });
 });
 
 app.delete('/api/admin/avisos/:id', exigirAdmin, async (req, res) => {
   const id = Number(req.params.id);
-  if (!Number.isInteger(id) || !(await db.excluirAviso(id))) return res.status(404).json({ erro: 'Aviso não encontrado.' });
+  const imgs = Number.isInteger(id) ? await db.excluirAviso(id) : null;
+  if (!imgs) return res.status(404).json({ erro: 'Aviso não encontrado.' });
+  await Promise.all(imgs.map((u) => arquivos.remover(u)));
   res.json({ ok: true });
 });
 
