@@ -15,7 +15,7 @@
       chave: 'cronograma', rotulo: 'Cronograma dos 8 módulos', tabela: true,
       ajuda: 'Para cada módulo, informe a data ou o mês e descreva o que será trabalhado.',
       colunas: [
-        { chave: 'data', rotulo: 'Data / mês', max: 60, exemplo: 'Ex: março/2026' },
+        { chave: 'data', rotulo: 'Data / mês', max: 60 },
         { chave: 'descricao', rotulo: 'O que será trabalhado', max: 500 },
       ],
     },
