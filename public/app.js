@@ -279,12 +279,14 @@ function topoDoAdmin() {
       ${itemMenu('#/admin', 'admin', 'envios', 'Envios')}
       ${itemMenu('#/admin-avisos', 'admin-avisos', 'avisos', 'Avisos')}
       ${itemMenu('#/material', 'material', 'material', 'Material')}
+      ${itemMenu('#/admin-mensagens', 'admin-mensagens', 'mensagens', 'Mensagens', 'badge-mensagens')}
       ${itemMenu('#/perguntas', 'perguntas', 'perguntas', 'Perguntas', 'badge-perguntas')}
       ${itemMenu('#/forum/geral', 'forum', 'forum', 'Fórum')}
       ${itemMenu('#/participantes', 'participantes perfil', 'participantes', 'Participantes')}
     </nav>
     <div class="usuario"><span>Gestor</span><button data-sair>Sair</button></div>`, '#/admin');
   api('/api/perguntas').then(({ perguntas }) => mostrarPendentes(perguntas)).catch(() => {});
+  api('/api/admin/mensagens/nao-lidas').then(({ total }) => mostrarMensagensNaoLidas(total)).catch(() => {});
 }
 
 function mostrarMensagensNaoLidas(n) {
@@ -1065,6 +1067,7 @@ async function telaAdminUsuario(id) {
         <p class="meta" style="margin:8px 0 0">CPF ${esc(mascaraCpf(u.cpf))}${u.email ? ` · <a href="mailto:${esc(u.email)}">${esc(u.email)}</a>` : ''} · cadastro em ${esc(formatarData(u.criado_em))}</p>
         <p class="meta" style="margin:0">${turmas.length} turma${turmas.length === 1 ? '' : 's'} · ${modulosEnv} módulo${modulosEnv === 1 ? '' : 's'} enviado${modulosEnv === 1 ? '' : 's'}${u.tipo === 'especialista' ? ` · ${envios.length - modulosEnv} expedição${envios.length - modulosEnv === 1 ? '' : 'ões'} enviada${envios.length - modulosEnv === 1 ? '' : 's'}` : ''} · ${semFeedback} sem feedback</p>
         ${linksRedes(u.redes)}
+        <p class="linha-botoes"><a class="botao" href="#/admin-mensagens/${u.id}">Enviar mensagem</a></p>
       </div>
     </div>
     <div>
@@ -1466,7 +1469,8 @@ async function telaVerPerfil(id) {
         <p class="linha-botoes">
           ${meu ? '<a class="botao" href="#/perfil">Editar meu perfil</a>' : ''}
           ${!meu && leitor.usuario ? `<a class="botao" href="#/mensagens/${perfil.id}">Enviar mensagem</a>` : ''}
-          ${leitor.admin ? `<a class="botao secundario" href="#/admin/usuario/${perfil.id}">Ver envios (gestor)</a>` : ''}
+          ${leitor.admin ? `<a class="botao" href="#/admin-mensagens/${perfil.id}">Enviar mensagem</a>
+            <a class="botao secundario" href="#/admin/usuario/${perfil.id}">Ver envios (gestor)</a>` : ''}
         </p>
       </div>
     </div>
@@ -1532,6 +1536,7 @@ async function telaParticipantes() {
         <div class="acoes">
           <a class="botao secundario" href="#/perfil/${p.id}">Ver perfil</a>
           ${leitor.usuario && leitor.usuario.id !== p.id ? `<a class="botao" href="#/mensagens/${p.id}">Mensagem</a>` : ''}
+          ${leitor.admin ? `<a class="botao" href="#/admin-mensagens/${p.id}">Mensagem</a>` : ''}
         </div>
       </div>`).join('') || '<div class="vazio">Ninguém encontrado.</div>';
   };
@@ -1552,12 +1557,21 @@ async function telaParticipantes() {
 async function telaMensagens() {
   const u = await exigirUsuario();
   if (!u) return;
-  const { conversas } = await api('/api/mensagens');
+  const { conversas, gestor } = await api('/api/mensagens');
   app.innerHTML = `
     <div class="cabecalho">
       <div><h1>Mensagens</h1><p class="sub">Converse com outros especialistas e instrutores.</p></div>
       <a class="botao-grande" href="#/participantes">+ Nova mensagem</a>
     </div>
+    ${gestor ? `
+      <a class="cartao conversa gestor ${gestor.nao_lidas ? 'nova' : ''}" href="#/mensagens/gestor">
+        <span class="avatar grande avatar-gestor" aria-hidden="true">JEA</span>
+        <div class="info">
+          <h3>Gestor <span class="tag">Coordenação</span>${gestor.nao_lidas ? ` <span class="badge">${gestor.nao_lidas}</span>` : ''}</h3>
+          <div class="meta trecho">${gestor.do_gestor ? '' : 'Você: '}${esc(gestor.texto.slice(0, 120))}</div>
+        </div>
+        <span class="meta">${esc(formatarData(gestor.criado_em))}</span>
+      </a>` : ''}
     ${conversas.map((c) => `
       <a class="cartao conversa ${c.nao_lidas ? 'nova' : ''}" href="#/mensagens/${c.id}">
         ${avatar(c.foto, 'grande')}
@@ -1566,33 +1580,20 @@ async function telaMensagens() {
           <div class="meta trecho">${c.de_id === u.id ? 'Você: ' : ''}${esc(c.texto.slice(0, 120))}</div>
         </div>
         <span class="meta">${esc(formatarData(c.criado_em))}</span>
-      </a>`).join('') || '<div class="vazio">Nenhuma conversa ainda. Clique em <strong>+ Nova mensagem</strong> para escolher alguém.</div>'}`;
+      </a>`).join('') || (gestor ? '' : '<div class="vazio">Nenhuma conversa ainda. Clique em <strong>+ Nova mensagem</strong> para escolher alguém.</div>')}`;
 }
 
-async function telaConversa(id) {
-  const u = await exigirUsuario();
-  if (!u) return;
-  let dados;
-  try {
-    dados = await api(`/api/mensagens/${encodeURIComponent(id)}`);
-  } catch (err) {
-    avisar(err.message);
-    return ir('#/mensagens');
-  }
-  const { outro, mensagens } = dados;
-  api('/api/mensagens/nao-lidas').then(({ total }) => mostrarMensagensNaoLidas(total)).catch(() => {});
+// Desenha um chat: cabeçalho, bolhas (as minhas à direita) e a caixa de envio.
+function desenharChat({ voltarPara, cabecalho, mensagens, minha, vazio, enviar, depois }) {
   app.innerHTML = `
-    ${voltar('#/mensagens', 'Mensagens')}
-    <div class="cabecalho-conversa">
-      ${avatar(outro.foto, 'grande')}
-      <div><h1><a href="#/perfil/${outro.id}">${esc(outro.nome)}</a></h1><span class="tag">${nomeTipo(outro.tipo)}</span></div>
-    </div>
+    ${voltar(voltarPara, 'Mensagens')}
+    <div class="cabecalho-conversa">${cabecalho}</div>
     <div class="cartao chat" id="chat">
       ${mensagens.map((m) => `
-        <div class="bolha ${m.de_id === u.id ? 'minha' : ''}">
+        <div class="bolha ${minha(m) ? 'minha' : ''}">
           <div class="mensagem">${esc(m.texto)}</div>
           <div class="hora">${esc(formatarData(m.criado_em))}</div>
-        </div>`).join('') || `<p class="meta" style="text-align:center">Escreva a primeira mensagem para ${esc(outro.nome.split(' ')[0])}.</p>`}
+        </div>`).join('') || `<p class="meta" style="text-align:center">${esc(vazio)}</p>`}
     </div>
     <form id="f" class="enviar-mensagem">
       <textarea id="texto" name="texto" maxlength="${MAX}" placeholder="Escreva sua mensagem" required></textarea>
@@ -1615,13 +1616,170 @@ async function telaConversa(id) {
     if (botao.disabled || !f.texto.value.trim()) return;
     botao.disabled = true;
     try {
-      await api(`/api/mensagens/${outro.id}`, { json: { texto: f.texto.value } });
-      telaConversa(outro.id);
+      await enviar(f.texto.value);
+      depois();
     } catch (err) {
       avisar(err.message);
       botao.disabled = false;
     }
   };
+}
+
+async function telaConversa(id) {
+  const u = await exigirUsuario();
+  if (!u) return;
+  if (id === 'gestor') return telaConversaGestor();
+  let dados;
+  try {
+    dados = await api(`/api/mensagens/${encodeURIComponent(id)}`);
+  } catch (err) {
+    avisar(err.message);
+    return ir('#/mensagens');
+  }
+  const { outro, mensagens } = dados;
+  api('/api/mensagens/nao-lidas').then(({ total }) => mostrarMensagensNaoLidas(total)).catch(() => {});
+  desenharChat({
+    voltarPara: '#/mensagens',
+    cabecalho: `${avatar(outro.foto, 'grande')}
+      <div><h1><a href="#/perfil/${outro.id}">${esc(outro.nome)}</a></h1><span class="tag">${nomeTipo(outro.tipo)}</span></div>`,
+    mensagens,
+    minha: (m) => m.de_id === u.id,
+    vazio: `Escreva a primeira mensagem para ${outro.nome.split(' ')[0]}.`,
+    enviar: (texto) => api(`/api/mensagens/${outro.id}`, { json: { texto } }),
+    depois: () => telaConversa(outro.id),
+  });
+}
+
+// Conversa do participante com o gestor.
+async function telaConversaGestor() {
+  const { mensagens } = await api('/api/mensagens/gestor');
+  api('/api/mensagens/nao-lidas').then(({ total }) => mostrarMensagensNaoLidas(total)).catch(() => {});
+  desenharChat({
+    voltarPara: '#/mensagens',
+    cabecalho: `<span class="avatar grande avatar-gestor" aria-hidden="true">JEA</span>
+      <div><h1>Gestor</h1><span class="tag">Coordenação</span></div>`,
+    mensagens,
+    minha: (m) => !m.do_gestor,
+    vazio: 'Escreva sua mensagem para o gestor.',
+    enviar: (texto) => api('/api/mensagens/gestor', { json: { texto } }),
+    depois: () => telaConversaGestor(),
+  });
+}
+
+// ---------- mensagens do gestor ----------
+
+async function telaAdminMensagens() {
+  let conversas, participantes;
+  try {
+    [{ conversas }, { participantes }] = await Promise.all([api('/api/admin/mensagens'), api('/api/participantes')]);
+  } catch (err) {
+    if (err.status === 401 || err.status === 403) return telaAdminLogin();
+    throw err;
+  }
+  topoDoAdmin();
+  app.innerHTML = `
+    <h1>Mensagens</h1>
+    <p class="sub">Mande uma mensagem para uma pessoa, para várias ou para um grupo. Cada pessoa recebe na conversa dela com o gestor e pode responder.</p>
+    <form id="f" class="cartao">
+      <h2 style="margin-top:0">Nova mensagem</h2>
+      <label>Quem vai receber</label>
+      <div class="opcoes">
+        <label><input type="radio" name="para" value="pessoas" checked>Escolher pessoas</label>
+        <label><input type="radio" name="para" value="todos">Todos</label>
+        <label><input type="radio" name="para" value="especialista">Especialistas</label>
+        <label><input type="radio" name="para" value="instrutor">Instrutores</label>
+      </div>
+      <div id="escolha" class="escolha">
+        <input id="busca" type="text" placeholder="Buscar pelo nome">
+        <div class="escolha-pessoas" id="pessoas"></div>
+        <p class="meta" id="escolhidas">Ninguém escolhido.</p>
+      </div>
+      <label for="texto">Mensagem</label>
+      <textarea id="texto" name="texto" maxlength="${MAX}" required></textarea>
+      <div class="contador"></div>
+      <div class="erro" id="erro"></div>
+      <div class="linha-botoes"><button type="submit">Enviar mensagem</button></div>
+    </form>
+    <h2>Conversas <span class="meta">(${conversas.length})</span></h2>
+    ${conversas.map((c) => `
+      <a class="cartao conversa ${c.nao_lidas ? 'nova' : ''}" href="#/admin-mensagens/${c.id}">
+        ${avatar(c.foto, 'grande')}
+        <div class="info">
+          <h3>${esc(c.nome)} <span class="tag">${nomeTipo(c.tipo)}</span>${c.nao_lidas ? ` <span class="badge">${c.nao_lidas}</span>` : ''}</h3>
+          <div class="meta trecho">${c.do_gestor ? 'Você: ' : ''}${esc(c.texto.slice(0, 120))}</div>
+        </div>
+        <span class="meta">${esc(formatarData(c.criado_em))}</span>
+      </a>`).join('') || '<div class="vazio">Nenhuma conversa ainda.</div>'}`;
+
+  const f = document.getElementById('f');
+  const escolhidos = new Set();
+  const lista = document.getElementById('pessoas');
+  let busca = '';
+  const desenharPessoas = () => {
+    const termo = busca.toLowerCase();
+    lista.innerHTML = participantes.filter((p) => p.nome.toLowerCase().includes(termo)).map((p) => `
+      <label><input type="checkbox" value="${p.id}" ${escolhidos.has(p.id) ? 'checked' : ''}>${esc(p.nome)} <span class="meta">${nomeTipo(p.tipo)}</span></label>`).join('')
+      || '<p class="meta">Ninguém encontrado.</p>';
+  };
+  const contarEscolhidos = () => {
+    const n = escolhidos.size;
+    document.getElementById('escolhidas').textContent = n ? `${n} pessoa${n === 1 ? '' : 's'} escolhida${n === 1 ? '' : 's'}.` : 'Ninguém escolhido.';
+  };
+  desenharPessoas();
+  contador(f.texto);
+  document.getElementById('busca').oninput = (ev) => { busca = ev.target.value.trim(); desenharPessoas(); };
+  lista.onchange = (ev) => {
+    const id = Number(ev.target.value);
+    ev.target.checked ? escolhidos.add(id) : escolhidos.delete(id);
+    contarEscolhidos();
+  };
+  f.onchange = (ev) => {
+    if (ev.target.name === 'para') document.getElementById('escolha').hidden = f.para.value !== 'pessoas';
+  };
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const botao = f.querySelector('button[type=submit]');
+    if (botao.disabled) return;
+    const para = f.para.value;
+    if (para === 'pessoas' && !escolhidos.size) {
+      document.getElementById('erro').textContent = 'Escolha quem vai receber.';
+      return;
+    }
+    if (para !== 'pessoas' && !confirm('Enviar esta mensagem para todas as pessoas do grupo?')) return;
+    botao.disabled = true;
+    try {
+      const json = para === 'pessoas' ? { ids: [...escolhidos], texto: f.texto.value } : { publico: para, texto: f.texto.value };
+      const { enviadas } = await api('/api/admin/mensagens', { json });
+      avisar(`Mensagem enviada para ${enviadas} pessoa${enviadas === 1 ? '' : 's'}.`);
+      telaAdminMensagens();
+    } catch (err) {
+      document.getElementById('erro').textContent = err.message;
+      botao.disabled = false;
+    }
+  };
+}
+
+async function telaAdminConversa(id) {
+  let dados;
+  try {
+    dados = await api(`/api/admin/mensagens/${encodeURIComponent(id)}`);
+  } catch (err) {
+    if (err.status === 401) return telaAdminLogin();
+    avisar(err.message);
+    return ir('#/admin-mensagens');
+  }
+  topoDoAdmin();
+  const { outro, mensagens } = dados;
+  desenharChat({
+    voltarPara: '#/admin-mensagens',
+    cabecalho: `${avatar(outro.foto, 'grande')}
+      <div><h1><a href="#/admin/usuario/${outro.id}">${esc(outro.nome)}</a></h1><span class="tag">${nomeTipo(outro.tipo)}</span></div>`,
+    mensagens,
+    minha: (m) => m.do_gestor,
+    vazio: `Escreva a primeira mensagem para ${outro.nome.split(' ')[0]}.`,
+    enviar: (texto) => api(`/api/admin/mensagens/${outro.id}`, { json: { texto } }),
+    depois: () => telaAdminConversa(outro.id),
+  });
 }
 
 // ---------- material ----------
@@ -2133,6 +2291,7 @@ async function rotear() {
       case 'perguntas': return await telaPerguntas();
       case 'perfil': return partes[1] ? await telaVerPerfil(partes[1]) : await telaPerfil();
       case 'admin-avisos': return await telaAdminAvisos();
+      case 'admin-mensagens': return partes[1] ? await telaAdminConversa(partes[1]) : await telaAdminMensagens();
       case 'forum':
         return partes[1] === 'topico' ? await telaTopico(partes[2]) : await telaForum(partes[1]);
       default: return ir('#/');

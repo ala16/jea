@@ -549,3 +549,11 @@ input[type=file]:hover { border-color: var(--verde); }
   .tabela-modulos:not(.leitura) tfoot td::before { content: none; }
 }
 .tabela-modulos.leitura .num { text-align: right; white-space: nowrap; }
+
+/* Mensagens do gestor */
+.avatar.avatar-gestor { display: inline-flex; align-items: center; justify-content: center; background: var(--verde); color: #fff; font-weight: 700; font-size: 14px; }
+.conversa.gestor { background: var(--verde-claro); }
+.escolha-pessoas { max-height: 220px; overflow-y: auto; border: 1px solid var(--borda); border-radius: 8px; padding: 6px 10px; margin-top: 8px; background: #fff; }
+.escolha-pessoas label { display: flex; align-items: center; gap: 8px; font-weight: normal; margin: 4px 0; }
+.escolha-pessoas input { width: auto; margin: 0; }
+.escolha { margin-top: 10px; }

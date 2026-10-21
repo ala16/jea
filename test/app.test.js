@@ -498,6 +498,56 @@ test('participantes e mensagens diretas', async () => {
   assert.equal((await cliente()('/api/mensagens')).status, 401);
 });
 
+test('mensagens do gestor para os participantes', async () => {
+  const a = cliente();
+  await a('/api/entrar', { json: { cpf: '529.982.247-25' } }); // especialista Maria
+  const b = cliente();
+  await b('/api/entrar', { json: { cpf: '111.444.777-35' } }); // instrutor João
+  const idA = (await a('/api/eu')).body.usuario.id;
+  const idB = (await b('/api/eu')).body.usuario.id;
+  const g = cliente();
+  assert.equal((await g('/api/admin/mensagens')).status, 401);
+  assert.equal((await a(`/api/admin/mensagens/${idB}`, { json: { texto: 'oi' } })).status, 401);
+  await g('/api/admin/entrar', { json: { senha: 'segredo' } });
+
+  // Para uma pessoa
+  assert.equal((await g(`/api/admin/mensagens/${idA}`, { json: { texto: ' ' } })).status, 400);
+  assert.equal((await g('/api/admin/mensagens/999999', { json: { texto: 'oi' } })).status, 404);
+  assert.equal((await g(`/api/admin/mensagens/${idA}`, { json: { texto: 'Oi Maria, envie o módulo 2.' } })).status, 200);
+  const antes = (await a('/api/mensagens/nao-lidas')).body.total;
+  assert.ok(antes >= 1);
+  let r = await a('/api/mensagens');
+  assert.equal(r.body.gestor.texto, 'Oi Maria, envie o módulo 2.');
+  assert.equal(r.body.gestor.nao_lidas, 1);
+  assert.equal((await b('/api/mensagens')).body.gestor, null);
+  r = await a('/api/mensagens/gestor');
+  assert.deepEqual(r.body.mensagens.map((m) => [m.do_gestor, m.texto]), [[true, 'Oi Maria, envie o módulo 2.']]);
+  assert.equal((await a('/api/mensagens/nao-lidas')).body.total, antes - 1);
+
+  // Resposta do participante chega para o gestor
+  assert.equal((await a('/api/mensagens/gestor', { json: { texto: 'Combinado!' } })).status, 200);
+  assert.equal((await g('/api/admin/mensagens/nao-lidas')).body.total, 1);
+  r = await g('/api/admin/mensagens');
+  assert.equal(r.body.conversas[0].id, idA);
+  assert.equal(r.body.conversas[0].nao_lidas, 1);
+  r = await g(`/api/admin/mensagens/${idA}`);
+  assert.equal(r.body.outro.id, idA);
+  assert.deepEqual(r.body.mensagens.map((m) => m.texto), ['Oi Maria, envie o módulo 2.', 'Combinado!']);
+  assert.equal((await g('/api/admin/mensagens/nao-lidas')).body.total, 0);
+
+  // Para um grupo e para pessoas escolhidas
+  assert.equal((await g('/api/admin/mensagens', { json: { texto: 'oi' } })).status, 400);
+  assert.equal((await g('/api/admin/mensagens', { json: { ids: [], texto: 'oi' } })).status, 400);
+  r = await g('/api/admin/mensagens', { json: { publico: 'instrutor', texto: 'Reunião dos instrutores amanhã.' } });
+  assert.ok(r.body.enviadas >= 1);
+  assert.equal((await b('/api/mensagens')).body.gestor.texto, 'Reunião dos instrutores amanhã.');
+  assert.equal((await a('/api/mensagens')).body.gestor.texto, 'Combinado!');
+  r = await g('/api/admin/mensagens', { json: { ids: [idA, idB, idB], texto: 'Bom trabalho a todos!' } });
+  assert.equal(r.body.enviadas, 2);
+  assert.equal((await a('/api/mensagens')).body.gestor.texto, 'Bom trabalho a todos!');
+  assert.equal((await b('/api/mensagens')).body.gestor.nao_lidas, 2);
+});
+
 test('gestor: excluir envio, ocultar módulos e excluir pessoa', async () => {
   const a = cliente();
   await a('/api/entrar', { json: { cpf: '123.456.780-62' } });

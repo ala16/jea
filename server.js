@@ -277,11 +277,23 @@ app.get('/api/participantes', exigirLeitorForum, async (req, res) => {
 
 // Mensagens diretas entre participantes.
 app.get('/api/mensagens', exigirUsuario, async (req, res) => {
-  res.json({ conversas: await db.conversas(req.usuario.id) });
+  const [conversas, gestor] = await Promise.all([db.conversas(req.usuario.id), db.resumoGestor(req.usuario.id)]);
+  res.json({ conversas, gestor: gestor || null });
 });
 
 app.get('/api/mensagens/nao-lidas', exigirUsuario, async (req, res) => {
   res.json({ total: await db.naoLidas(req.usuario.id) });
+});
+
+// Conversa do participante com o gestor (precisa vir antes de /api/mensagens/:id).
+app.get('/api/mensagens/gestor', exigirUsuario, async (req, res) => {
+  res.json({ mensagens: await db.conversaGestor(req.usuario.id, false) });
+});
+
+app.post('/api/mensagens/gestor', exigirUsuario, async (req, res) => {
+  const corpo = texto(req.body.texto).trim();
+  if (!corpo) return res.status(400).json({ erro: 'Escreva a mensagem.' });
+  res.json({ mensagem: await db.enviarMensagemGestor(req.usuario.id, false, corpo) });
 });
 
 async function carregarOutro(req, res, next) {
@@ -594,6 +606,48 @@ app.delete('/api/admin/perguntas/:id', exigirAdmin, async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || !(await db.excluirPergunta(id))) return res.status(404).json({ erro: 'Pergunta não encontrada.' });
   res.json({ ok: true });
+});
+
+// Mensagens do gestor: uma conversa com cada participante.
+app.get('/api/admin/mensagens', exigirAdmin, async (req, res) => {
+  res.json({ conversas: await db.conversasDoGestor() });
+});
+
+app.get('/api/admin/mensagens/nao-lidas', exigirAdmin, async (req, res) => {
+  res.json({ total: await db.naoLidasDoGestor() });
+});
+
+// Para várias pessoas: ids escolhidos ou um público (todos, especialistas, instrutores).
+app.post('/api/admin/mensagens', exigirAdmin, async (req, res) => {
+  const corpo = texto(req.body.texto).trim();
+  if (!corpo) return res.status(400).json({ erro: 'Escreva a mensagem.' });
+  let para;
+  if (Array.isArray(req.body.ids)) {
+    const ids = [...new Set(req.body.ids.map(Number).filter(Number.isInteger))];
+    if (!ids.length) return res.status(400).json({ erro: 'Escolha quem vai receber.' });
+    para = { ids };
+  } else {
+    if (!PUBLICOS.includes(req.body.publico)) return res.status(400).json({ erro: 'Escolha quem vai receber.' });
+    para = { tipo: req.body.publico === 'todos' ? null : req.body.publico };
+  }
+  res.json({ enviadas: await db.enviarMensagemGestorEmMassa(para, corpo) });
+});
+
+async function carregarParticipante(req, res, next) {
+  const id = Number(req.params.id);
+  req.participante = Number.isInteger(id) ? await db.perfil(id) : null;
+  if (!req.participante) return res.status(404).json({ erro: 'Participante não encontrado.' });
+  next();
+}
+
+app.get('/api/admin/mensagens/:id', exigirAdmin, carregarParticipante, async (req, res) => {
+  res.json({ outro: req.participante, mensagens: await db.conversaGestor(req.participante.id, true) });
+});
+
+app.post('/api/admin/mensagens/:id', exigirAdmin, carregarParticipante, async (req, res) => {
+  const corpo = texto(req.body.texto).trim();
+  if (!corpo) return res.status(400).json({ erro: 'Escreva a mensagem.' });
+  res.json({ mensagem: await db.enviarMensagemGestor(req.participante.id, true, corpo) });
 });
 
 // Admin

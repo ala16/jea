@@ -195,6 +195,19 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS expedicoes_ocultas (
     numero INTEGER PRIMARY KEY CHECK (numero BETWEEN 1 AND 8)
   );
+
+  -- Conversa de cada participante com o gestor. do_gestor diz quem escreveu;
+  -- lida vale para quem recebeu (o participante, se do_gestor, ou o gestor).
+  CREATE TABLE IF NOT EXISTS mensagens_gestor (
+    id SERIAL PRIMARY KEY,
+    usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    do_gestor BOOLEAN NOT NULL,
+    texto TEXT NOT NULL,
+    lida BOOLEAN NOT NULL DEFAULT false,
+    criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS mensagens_gestor_usuario_idx ON mensagens_gestor (usuario_id, id);
+  CREATE INDEX IF NOT EXISTS mensagens_gestor_nao_lidas_idx ON mensagens_gestor (do_gestor, usuario_id) WHERE NOT lida;
 `;
 
 // O esquema só é aplicado quando muda (a versão é o hash do texto). Assim cada nova instância
@@ -332,7 +345,70 @@ module.exports = {
     um('INSERT INTO mensagens (de_id, para_id, texto) VALUES ($1, $2, $3) RETURNING *', [de, para, texto]),
 
   async naoLidas(usuarioId) {
-    return (await um('SELECT COUNT(*)::int AS n FROM mensagens WHERE para_id = $1 AND NOT lida', [usuarioId])).n;
+    const r = await um(
+      `SELECT (SELECT COUNT(*) FROM mensagens WHERE para_id = $1 AND NOT lida)
+            + (SELECT COUNT(*) FROM mensagens_gestor WHERE usuario_id = $1 AND do_gestor AND NOT lida) AS n`,
+      [usuarioId]
+    );
+    return Number(r.n);
+  },
+
+  // Conversa com o gestor, vista pelo participante (gestor = false) ou pelo gestor (gestor = true).
+  // Abrir a conversa marca como lidas as mensagens que o outro lado escreveu.
+  async conversaGestor(usuarioId, gestor) {
+    await q('UPDATE mensagens_gestor SET lida = true WHERE usuario_id = $1 AND do_gestor = $2 AND NOT lida', [
+      usuarioId,
+      !gestor,
+    ]);
+    return todos('SELECT * FROM mensagens_gestor WHERE usuario_id = $1 ORDER BY id DESC LIMIT 200', [usuarioId]).then((r) =>
+      r.reverse()
+    );
+  },
+
+  // Resumo da conversa com o gestor para a lista de mensagens do participante.
+  resumoGestor: (usuarioId) =>
+    um(
+      `SELECT texto, criado_em, do_gestor,
+              (SELECT COUNT(*)::int FROM mensagens_gestor WHERE usuario_id = $1 AND do_gestor AND NOT lida) AS nao_lidas
+         FROM mensagens_gestor WHERE usuario_id = $1 ORDER BY id DESC LIMIT 1`,
+      [usuarioId]
+    ),
+
+  enviarMensagemGestor: (usuarioId, doGestor, texto) =>
+    um('INSERT INTO mensagens_gestor (usuario_id, do_gestor, texto) VALUES ($1, $2, $3) RETURNING *', [
+      usuarioId,
+      doGestor,
+      texto,
+    ]),
+
+  // Mensagem do gestor para várias pessoas de uma vez: cada uma recebe na sua conversa.
+  async enviarMensagemGestorEmMassa({ ids, tipo }, texto) {
+    const r = ids
+      ? await q(
+          `INSERT INTO mensagens_gestor (usuario_id, do_gestor, texto)
+           SELECT id, true, $2 FROM usuarios WHERE id = ANY($1::int[])`,
+          [ids, texto]
+        )
+      : await q(
+          `INSERT INTO mensagens_gestor (usuario_id, do_gestor, texto)
+           SELECT id, true, $2 FROM usuarios WHERE $1::text IS NULL OR tipo = $1`,
+          [tipo || null, texto]
+        );
+    return r.rowCount;
+  },
+
+  // Conversas do gestor: uma por participante, a mais recente primeiro.
+  conversasDoGestor: () =>
+    todos(
+      `SELECT u.id, u.nome, u.tipo, u.foto, c.texto, c.criado_em, c.do_gestor,
+              (SELECT COUNT(*)::int FROM mensagens_gestor n WHERE n.usuario_id = u.id AND NOT n.do_gestor AND NOT n.lida) AS nao_lidas
+         FROM (SELECT DISTINCT ON (usuario_id) * FROM mensagens_gestor ORDER BY usuario_id, id DESC) c
+         JOIN usuarios u ON u.id = c.usuario_id
+        ORDER BY c.id DESC`
+    ),
+
+  async naoLidasDoGestor() {
+    return (await um('SELECT COUNT(*)::int AS n FROM mensagens_gestor WHERE NOT do_gestor AND NOT lida')).n;
   },
 
   async fotoDePerfil(url) {
