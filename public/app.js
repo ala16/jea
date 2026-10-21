@@ -228,6 +228,18 @@ const ICONES = {
   envios: '<path d="M9 4h6v3H9z"/><path d="M8 5H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2"/><path d="M9 13l2 2 4-4"/>',
 };
 
+// Ícones da página da turma: áreas (módulos e expedições) e situação dos envios.
+const ICONES_TURMA = {
+  modulo: '<path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/>',
+  expedicao: '<path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3z"/><path d="M9 3v15M15 6v15"/>',
+  enviado: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  'com-feedback': '<path d="M4 4h16v11H8l-4 4V4z"/><path d="M8 9h8M8 12h5"/>',
+};
+
+function icone(caminhos) {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${caminhos}</svg>`;
+}
+
 const SETA_ESQ = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>';
 const SETA_DIR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
 
@@ -696,34 +708,55 @@ async function telaTurma(turmaId, area, numero, editando = false) {
   const link = (n) => `#/turma/${turma.id}/${A.rota}${n}`;
   const titulo = expedicao ? `Expedição do Agro ${numero}` : `Módulo ${numero}${especial ? ' · Planejamento' : ''}`;
 
+  // Situação de cada envio: Pendente, Enviado ou Com feedback (cor e ícone próprios).
+  const situacao = (x) => x?.feedback ? { classe: 'com-feedback', rotulo: 'Com feedback' }
+    : x ? { classe: 'enviado', rotulo: expedicao ? 'Enviada' : 'Enviado' } : { classe: 'pendente', rotulo: 'Pendente' };
+  const sit = situacao(m);
+  const qtd = (lista) => (lista || []).length;
+  const abaArea = (chave, href, ativa, n) => `
+      <a href="${href}" class="area-${chave} ${ativa ? 'ativa' : ''}" ${ativa ? 'aria-current="page"' : ''}>
+        <span class="area-icone">${icone(ICONES_TURMA[chave])}</span>
+        <span class="area-texto">
+          <strong>${chave === 'expedicao' ? 'Expedições do Agro' : 'Módulos'}</strong>
+          <small>${n} de 8 enviad${chave === 'expedicao' ? 'as' : 'os'}</small>
+          <span class="progresso"><span style="width:${(n / 8) * 100}%"></span></span>
+        </span>
+      </a>`;
+
   app.innerHTML = `
     ${voltar('#/painel', 'Minhas turmas')}
     <h1>Turma de ${esc(turma.cidade)}</h1>
     <p class="sub">${esc(turma.sindicato)} · Horário: ${esc(turma.horario)}</p>
-    ${instrutor ? '' : `<nav class="abas">
-      <a href="#/turma/${turma.id}/1" class="${expedicao ? '' : 'ativa'}">Módulos <span class="meta">(${r.modulos.length}/8)</span></a>
-      <a href="#/turma/${turma.id}/expedicao/1" class="${expedicao ? 'ativa' : ''}">Expedições do Agro <span class="meta">(${(r.expedicoes || []).length}/8)</span></a>
-    </nav>`}
+    ${instrutor ? `
     <div class="resumo-turma">
       ${barraProgresso(enviados.length)}
-      <span class="meta">${enviados.length} de 8 ${A.plural} enviad${expedicao ? 'as' : 'os'}</span>
-    </div>
-    <p class="ajuda">${expedicao
-      ? 'Aqui ficam as 8 Expedições do Agro da turma. Escolha a expedição, preencha e clique em <strong>Enviar expedição</strong>.'
-      : 'Escolha o módulo, preencha e clique em <strong>Enviar módulo</strong>.'} Depois de enviado, use <strong>Editar envio</strong> para alterar.</p>
+      <span class="meta">${enviados.length} de 8 ${A.plural} enviados</span>
+    </div>` : `
+    <nav class="areas-turma" aria-label="Áreas da turma">
+      ${abaArea('modulo', `#/turma/${turma.id}/1`, !expedicao, qtd(r.modulos))}
+      ${abaArea('expedicao', `#/turma/${turma.id}/expedicao/1`, expedicao, qtd(r.expedicoes))}
+    </nav>`}
+    <ol class="passos">
+      <li><b>1</b><span>Escolha ${expedicao ? 'a expedição' : 'o módulo'} na lista abaixo</span></li>
+      <li><b>2</b><span>Preencha e clique em <strong>${expedicao ? 'Enviar expedição' : 'Enviar módulo'}</strong></span></li>
+      <li><b>3</b><span>Precisa mudar? Use <strong>Editar envio</strong></span></li>
+    </ol>
     ${numero === undefined ? `<div class="vazio">Nenhum${expedicao ? 'a expedição' : ' módulo'} está liberad${expedicao ? 'a' : 'o'} para envio no momento. Aguarde o gestor liberar.</div>` : `
-    <nav class="modulos">
+    <nav class="modulos" aria-label="${expedicao ? 'Expedições' : 'Módulos'}">
       ${disponiveis.map((n) => {
-        const x = enviados.find((y) => y.numero === n);
-        const estadoMod = x?.feedback ? 'Com feedback' : x ? 'Enviado' : 'Pendente';
-        return `<a href="${link(n)}" class="${n === numero ? 'ativa' : ''} ${x ? 'enviado' : ''} ${x?.feedback ? 'com-feedback' : ''}">
-          <strong>${A.nome} ${n}</strong><small>${x ? '✓ ' : ''}${estadoMod}</small></a>`;
+        const s = situacao(enviados.find((y) => y.numero === n));
+        return `<a href="${link(n)}" class="${s.classe} ${n === numero ? 'ativa' : ''}" ${n === numero ? 'aria-current="page"' : ''}>
+          <span class="mod-num">${s.classe === 'pendente' ? n : icone(ICONES_TURMA[s.classe])}</span>
+          <span class="mod-info"><strong>${A.nome} ${n}</strong><small class="situacao ${s.classe}">${s.rotulo}</small></span></a>`;
       }).join('')}
     </nav>
-    <div class="cartao">
-      <h2 style="margin-top:0">${titulo}</h2>
+    <div class="cartao cartao-envio">
+      <div class="cabecalho-envio">
+        <h2>${titulo}</h2>
+        <span class="situacao ${sit.classe}">${sit.rotulo}</span>
+      </div>
       ${m?.feedback ? `<div class="feedback"><strong>Feedback do gestor (${esc(formatarData(m.feedback_em))}):</strong>\n${esc(m.feedback)}</div>` : ''}
-      <p class="meta">${m ? datasEnvio(m) : 'Ainda não enviado.'}</p>
+      <p class="meta">${m ? datasEnvio(m) : `Ainda não enviad${expedicao ? 'a' : 'o'}.`}</p>
       ${m && !editando ? `
       <div class="detalhe">${detalheEnvio({ ...m, area }, false)}</div>
       <div class="linha-botoes">
