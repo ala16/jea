@@ -752,6 +752,85 @@ function leituraTabela(c, dados) {
   return { texto: partes.join('\n'), html };
 }
 
+// PDF do Planejamento (módulo 1 do especialista): os campos, o cronograma e o orçamento com o total.
+async function baixarPdfPlanejamento(m, turma, usuario) {
+  const { jsPDF, autoTable } = await import('/vendor/pdf.js');
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const margem = 18;
+  const largura = doc.internal.pageSize.getWidth() - margem * 2;
+  const fimPagina = doc.internal.pageSize.getHeight() - margem;
+  const VERDE = [31, 122, 58];
+  let y = margem;
+  const espaco = (alt) => {
+    if (y + alt > fimPagina) {
+      doc.addPage();
+      y = margem;
+    }
+  };
+  const escrever = (texto, { tam = 10, negrito = false, cor = [33, 33, 33], depois = 2 } = {}) => {
+    doc.setFont('helvetica', negrito ? 'bold' : 'normal').setFontSize(tam).setTextColor(...cor);
+    const alt = tam * 0.42;
+    for (const linha of doc.splitTextToSize(String(texto), largura)) {
+      espaco(alt);
+      doc.text(linha, margem, y + alt * 0.8);
+      y += alt;
+    }
+    y += depois;
+  };
+
+  const dados = m.dados || {};
+  escrever('Módulo 1 - Planejamento', { tam: 18, negrito: true, cor: VERDE });
+  escrever(`Turma de ${turma.cidade} · ${turma.sindicato} · Horário: ${turma.horario}`, { cor: [90, 90, 90], depois: 0 });
+  escrever(`Especialista: ${usuario?.nome || ''}`, { cor: [90, 90, 90], depois: 0 });
+  escrever(`Enviado em ${formatarData(m.enviado_em || m.atualizado_em)}${m.edicoes ? ` · última edição em ${formatarData(m.atualizado_em)}` : ''}`, { tam: 9, cor: [120, 120, 120], depois: 6 });
+
+  for (const c of CAMPOS) {
+    if (!c.chave) continue;
+    // A tabela de 8 linhas curtas cabe em ~70mm: começa na página seguinte em vez de partir no meio.
+    espaco(c.tabela ? 75 : 14);
+    escrever(c.rotulo, { tam: 12, negrito: true, cor: VERDE });
+    if (!c.tabela) {
+      escrever(dados[c.chave] || '(vazio)', { depois: 5 });
+      continue;
+    }
+    const anterior = textoAnterior(dados, c.chave);
+    if (anterior) escrever(`Texto livre: ${anterior}`, { depois: 3 });
+    const linhas = linhasDe(dados, c.chave);
+    const temValor = c.colunas.some((x) => x.valor);
+    const cel = (col, l) => {
+      const v = l?.[col.chave];
+      if (v == null || v === '') return '-';
+      return col.valor ? formatarReais(v) : String(v);
+    };
+    autoTable(doc, {
+      startY: y,
+      margin: { left: margem, right: margem },
+      head: [['Módulo', ...c.colunas.map((col) => col.rotulo)]],
+      body: [1, 2, 3, 4, 5, 6, 7, 8].map((n) => [`Módulo ${n}`, ...c.colunas.map((col) => cel(col, linhas[n - 1]))]),
+      foot: temValor ? [['Total geral', ...c.colunas.map((col, i) => (i === c.colunas.length - 1 ? formatarReais(totalTabela(c, linhas)) : ''))]] : undefined,
+      showFoot: 'lastPage',
+      theme: 'grid',
+      styles: { font: 'helvetica', fontSize: 9, cellPadding: 2, valign: 'top' },
+      headStyles: { fillColor: VERDE, textColor: 255 },
+      footStyles: { fillColor: [232, 243, 235], textColor: [20, 20, 20], fontStyle: 'bold' },
+      columnStyles: {
+        0: { cellWidth: 24, fontStyle: 'bold' },
+        ...Object.fromEntries(c.colunas.map((col, i) => [i + 1, col.valor ? { halign: 'right', cellWidth: 34 } : col.max <= 100 ? { cellWidth: 34 } : {}])),
+      },
+    });
+    y = doc.lastAutoTable.finalY + 7;
+  }
+
+  if (m.anexos?.length) {
+    espaco(14);
+    escrever('Anexos', { tam: 12, negrito: true, cor: VERDE });
+    for (const a of m.anexos) escrever(`- ${a.nome || a.url}`, { depois: 0 });
+  }
+
+  const nome = `planejamento-modulo1-${turma.cidade}`.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w-]+/g, '-').toLowerCase();
+  doc.save(`${nome}.pdf`);
+}
+
 function formModulo1Especialista(m) {
   const dados = m?.dados || {};
   return `<div class="grupo"><h2 style="margin-top:0">${esc(CAMPOS[0].grupo)}</h2>
@@ -858,6 +937,7 @@ async function telaTurma(turmaId, area, numero, editando = false) {
       <div class="detalhe">${detalheEnvio({ ...m, area }, false)}</div>
       <div class="linha-botoes">
         <button type="button" id="editar">Editar envio</button>
+        ${especial ? '<button type="button" class="secundario" id="baixar-pdf">Baixar em PDF</button>' : ''}
       </div>` : `
       <form id="f">
         ${expedicao ? formExpedicao(m) : especial ? formModulo1Especialista(m) : formModuloSimples(m, instrutor)}
@@ -891,6 +971,19 @@ async function telaTurma(turmaId, area, numero, editando = false) {
   const f = document.getElementById('f');
   if (!f) {
     document.getElementById('editar').onclick = () => telaTurma(turma.id, area, numero, true);
+    const pdf = document.getElementById('baixar-pdf');
+    if (pdf) {
+      pdf.onclick = async () => {
+        pdf.disabled = true;
+        try {
+          await baixarPdfPlanejamento(m, turma, u);
+        } catch (err) {
+          avisar(`Não foi possível gerar o PDF: ${err.message}`);
+        } finally {
+          pdf.disabled = false;
+        }
+      };
+    }
     return;
   }
   const cancelar = document.getElementById('cancelar');
