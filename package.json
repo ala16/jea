@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test",
-    "vendor": "echo \"export { upload } from '@vercel/blob/client';\" | esbuild --bundle --format=esm --platform=browser --minify --outfile=public/vendor/blob-client.js"
+    "vendor": "npm run vendor:blob && npm run vendor:pdf",
+    "vendor:blob": "echo \"export { upload } from '@vercel/blob/client';\" | esbuild --bundle --format=esm --platform=browser --minify --outfile=public/vendor/blob-client.js",
+    "vendor:pdf": "echo \"export { jsPDF } from 'jspdf'; export { autoTable } from 'jspdf-autotable';\" | esbuild --bundle --format=esm --platform=browser --minify --external:html2canvas --external:dompurify --external:canvg --outfile=public/vendor/pdf.js"
   },
   "engines": {
     "node": "22.x"
@@ -19,6 +21,8 @@
     "pg": "^8.23.1"
   },
   "devDependencies": {
-    "esbuild": "^0.28.2"
+    "esbuild": "^0.28.2",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.9"
   }
 }
